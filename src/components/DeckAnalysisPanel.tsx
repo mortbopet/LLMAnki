@@ -5,10 +5,11 @@ import {
     Lightbulb,
     Star,
     TrendingUp,
-    Plus
+    AlertCircle,
+    Tag
 } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
-import { CardViewer } from './CardViewer';
+import { CardCarousel } from './CardCarousel';
 import type { DeckAnalysisResult, SuggestedCard } from '../types';
 
 interface DeckAnalysisPanelProps {
@@ -16,21 +17,36 @@ interface DeckAnalysisPanelProps {
 }
 
 export const DeckAnalysisPanel: React.FC<DeckAnalysisPanelProps> = ({ result }) => {
-    const addPendingChange = useAppStore(state => state.addPendingChange);
+    const addCardToDeck = useAppStore(state => state.addCardToDeck);
+    const selectedDeckId = useAppStore(state => state.selectedDeckId);
 
     const handleAddCard = (card: SuggestedCard) => {
-        addPendingChange({
-            type: 'add',
-            newCard: card,
-            committed: false
-        });
+        if (selectedDeckId !== null) {
+            addCardToDeck(card, selectedDeckId);
+        }
     };
 
     // Find the max count for scaling the bar chart
     const maxCount = Math.max(...result.scoreDistribution.map(d => d.count), 1);
 
+    // Calculate total suggested cards (from individual analyses + deck-level suggestions)
+    const suggestedCardsCount = (result.totalSuggestedFromCards ?? 0) + result.suggestedNewCards.length;
+
     return (
         <div className="space-y-6">
+            {/* Error Display */}
+            {result.error && (
+                <div className="bg-red-900/30 border border-red-600 rounded-lg p-4">
+                    <div className="flex items-start gap-3">
+                        <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+                        <div>
+                            <h3 className="font-semibold text-red-400 mb-1">Analysis Error</h3>
+                            <p className="text-sm text-red-300">{result.error}</p>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* Overview Stats */}
             <div className="bg-gray-800 rounded-lg p-4">
                 <h3 className="font-semibold flex items-center gap-2 mb-4">
@@ -57,12 +73,23 @@ export const DeckAnalysisPanel: React.FC<DeckAnalysisPanelProps> = ({ result }) 
                     </div>
                     <div className="bg-gray-700 rounded-lg p-3 text-center">
                         <div className="text-2xl font-bold text-purple-400">
-                            {result.suggestedNewCards.length}
+                            {suggestedCardsCount}
                         </div>
                         <div className="text-xs text-gray-400">Suggested Cards</div>
                     </div>
                 </div>
             </div>
+
+            {/* Deck Summary - Now immediately after Overview */}
+            {result.deckSummary && (
+                <div className="bg-gray-800 rounded-lg p-4">
+                    <h3 className="font-semibold flex items-center gap-2 mb-3">
+                        <Star className="w-5 h-5 text-yellow-500" />
+                        Deck Summary
+                    </h3>
+                    <p className="text-sm text-gray-300 whitespace-pre-wrap">{result.deckSummary}</p>
+                </div>
+            )}
 
             {/* Score Distribution */}
             <div className="bg-gray-800 rounded-lg p-4">
@@ -72,28 +99,64 @@ export const DeckAnalysisPanel: React.FC<DeckAnalysisPanelProps> = ({ result }) 
                 </h3>
 
                 <div className="flex items-end gap-1 h-32">
-                    {result.scoreDistribution.map(({ score, count }) => (
-                        <div key={score} className="flex-1 flex flex-col items-center gap-1">
-                            <div
-                                className={`w-full rounded-t transition-all ${score >= 7 ? 'bg-green-500' :
-                                        score >= 4 ? 'bg-yellow-500' : 'bg-red-500'
-                                    }`}
-                                style={{
-                                    height: `${(count / maxCount) * 100}%`,
-                                    minHeight: count > 0 ? '4px' : '0'
-                                }}
-                            />
-                            <span className="text-xs text-gray-400">{score}</span>
-                        </div>
-                    ))}
+                    {result.scoreDistribution.map(({ score, count }) => {
+                        const heightPercent = maxCount > 0 ? (count / maxCount) * 100 : 0;
+                        return (
+                            <div key={score} className="flex-1 flex flex-col items-center h-full">
+                                {/* Bar container - takes remaining space */}
+                                <div className="flex-1 flex flex-col justify-end w-full">
+                                    {count > 0 && (
+                                        <span className="text-xs text-gray-400 text-center mb-1">{count}</span>
+                                    )}
+                                    <div
+                                        className={`w-full rounded-t transition-all ${score >= 7 ? 'bg-green-500' :
+                                                score >= 4 ? 'bg-yellow-500' : 'bg-red-500'
+                                            }`}
+                                        style={{
+                                            height: `${heightPercent}%`,
+                                            minHeight: count > 0 ? '4px' : '0'
+                                        }}
+                                    />
+                                </div>
+                                {/* Score label */}
+                                <span className="text-xs text-gray-400 mt-1">{score}</span>
+                            </div>
+                        );
+                    })}
                 </div>
                 <div className="text-center text-xs text-gray-400 mt-2">
                     Card Quality Score (1-10)
                 </div>
             </div>
 
-            {/* Common Issues */}
-            {result.commonIssues.length > 0 && (
+            {/* Classified Issues - LLM-organized categories */}
+            {result.classifiedIssues && result.classifiedIssues.length > 0 && (
+                <div className="bg-gray-800 rounded-lg p-4">
+                    <h3 className="font-semibold flex items-center gap-2 mb-3">
+                        <Tag className="w-5 h-5 text-purple-500" />
+                        Issue Categories
+                    </h3>
+                    <div className="space-y-4">
+                        {result.classifiedIssues.map(({ category, issues }) => (
+                            <div key={category}>
+                                <h4 className="text-sm font-medium text-purple-400 mb-2">{category}</h4>
+                                <ul className="space-y-1 pl-4">
+                                    {issues.map((issueItem, idx) => (
+                                        <li key={idx} className="text-sm text-gray-400 flex items-start gap-2">
+                                            <span className="text-gray-600">•</span>
+                                            <span>{issueItem.issue}</span>
+                                            <span className="text-gray-500 text-xs">({issueItem.count})</span>
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            {/* Common Issues - Fallback if no classified issues */}
+            {(!result.classifiedIssues || result.classifiedIssues.length === 0) && result.commonIssues.length > 0 && (
                 <div className="bg-gray-800 rounded-lg p-4">
                     <h3 className="font-semibold flex items-center gap-2 mb-3">
                         <AlertTriangle className="w-5 h-5 text-orange-500" />
@@ -110,48 +173,20 @@ export const DeckAnalysisPanel: React.FC<DeckAnalysisPanelProps> = ({ result }) 
                 </div>
             )}
 
-            {/* Deck Summary */}
-            {result.deckSummary && (
-                <div className="bg-gray-800 rounded-lg p-4">
-                    <h3 className="font-semibold flex items-center gap-2 mb-3">
-                        <Star className="w-5 h-5 text-yellow-500" />
-                        Deck Summary
-                    </h3>
-                    <p className="text-sm text-gray-300 whitespace-pre-wrap">{result.deckSummary}</p>
-                </div>
-            )}
-
-            {/* Suggested New Cards */}
+            {/* Suggested New Cards - Using Swiper Carousel */}
             {result.suggestedNewCards.length > 0 && (
                 <div className="bg-gray-800 rounded-lg p-4">
                     <h3 className="font-semibold flex items-center gap-2 mb-4">
                         <Lightbulb className="w-5 h-5 text-blue-500" />
-                        Suggested New Cards
+                        Suggested New Cards ({result.suggestedNewCards.length})
                     </h3>
 
-                    <div className="space-y-4">
-                        {result.suggestedNewCards.map((card, index) => (
-                            <div key={index} className="border border-gray-600 rounded-lg overflow-hidden">
-                                <CardViewer card={card} title={`Suggestion ${index + 1}`} isSuggestion />
-
-                                {card.explanation && (
-                                    <div className="px-4 py-2 bg-gray-700 text-sm text-gray-300 border-t border-gray-600">
-                                        {card.explanation}
-                                    </div>
-                                )}
-
-                                <div className="px-4 py-2 bg-gray-700 border-t border-gray-600 flex justify-end">
-                                    <button
-                                        onClick={() => handleAddCard(card)}
-                                        className="flex items-center gap-1 px-3 py-1 bg-green-600 hover:bg-green-700 rounded text-sm transition-colors"
-                                    >
-                                        <Plus className="w-4 h-4" />
-                                        Add to Pending
-                                    </button>
-                                </div>
-                            </div>
-                        ))}
-                    </div>
+                    <CardCarousel
+                        cards={result.suggestedNewCards}
+                        onAddCard={(card) => handleAddCard(card)}
+                        showActions={true}
+                        titlePrefix="Suggestion"
+                    />
                 </div>
             )}
         </div>

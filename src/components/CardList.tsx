@@ -1,5 +1,5 @@
 import React, { useMemo, useCallback, useState } from 'react';
-import { CreditCard, Tag, Layers, Search, X, CheckCircle } from 'lucide-react';
+import { CreditCard, Tag, Layers, Search, X, CheckCircle, AlertCircle, Wand2 } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 import { renderCard, getCardTypeName } from '../utils/cardRenderer';
 import { getCardsInDeck } from '../utils/ankiParser';
@@ -11,6 +11,7 @@ export const CardList: React.FC = () => {
     const selectedCardId = useAppStore(state => state.selectedCardId);
     const selectCard = useAppStore(state => state.selectCard);
     const analysisCache = useAppStore(state => state.analysisCache);
+    const isGeneratedCard = useAppStore(state => state.isGeneratedCard);
 
     const [renderedCards, setRenderedCards] = React.useState<Map<number, RenderedCard>>(new Map());
     const [isLoading, setIsLoading] = React.useState(false);
@@ -21,6 +22,11 @@ export const CardList: React.FC = () => {
         if (!collection || selectedDeckId === null) return [];
         return getCardsInDeck(collection, selectedDeckId, includeSubdecks);
     }, [collection, selectedDeckId, includeSubdecks]);
+
+    // Count generated cards in the current deck
+    const generatedCardCount = useMemo(() => {
+        return allCards.filter(card => isGeneratedCard(card.id)).length;
+    }, [allCards, isGeneratedCard]);
 
     // Filter cards based on search query
     const cards = useMemo(() => {
@@ -125,7 +131,11 @@ export const CardList: React.FC = () => {
 
             {/* Cards header */}
             <div className="px-2 py-1.5 text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center justify-between">
-                <span>Cards ({cards.length}{allCards.length !== cards.length ? ` of ${allCards.length}` : ''})</span>
+                <span>
+                    Cards ({cards.length}
+                    {allCards.length !== cards.length ? ` of ${allCards.length}` : ''}
+                    {generatedCardCount > 0 ? ` • ${generatedCardCount} new` : ''})
+                </span>
             </div>
 
             {/* Loading state */}
@@ -152,38 +162,59 @@ export const CardList: React.FC = () => {
                     const isSelected = selectedCardId === card.id;
                     const isAnalyzed = analysisCache.has(card.id);
                     const cachedResult = analysisCache.get(card.id);
+                    const isGenerated = isGeneratedCard(card.id);
 
                     return (
                         <div
                             key={card.id}
-                            className={`p-2 rounded cursor-pointer transition-colors ${isSelected ? 'bg-blue-600' : 'hover:bg-gray-700 bg-gray-800'
-                                }`}
+                            className={`p-2 rounded cursor-pointer transition-colors ${
+                                isSelected ? 'bg-blue-600' : 
+                                isGenerated ? 'hover:bg-purple-700/50 bg-purple-900/30 border border-purple-700/50' :
+                                'hover:bg-gray-700 bg-gray-800'
+                            }`}
                             onClick={() => handleSelectCard(card)}
                         >
                             <div className="flex items-start gap-2">
-                                <CreditCard className="w-4 h-4 mt-0.5 flex-shrink-0 text-gray-400" />
+                                {isGenerated ? (
+                                    <Wand2 className="w-4 h-4 mt-0.5 flex-shrink-0 text-purple-400" />
+                                ) : (
+                                    <CreditCard className="w-4 h-4 mt-0.5 flex-shrink-0 text-gray-400" />
+                                )}
                                 <div className="flex-1 min-w-0">
                                     <div className="flex items-center gap-2">
                                         <div
-                                            className="text-sm truncate flex-1"
+                                            className={`text-sm truncate flex-1 ${isGenerated ? 'text-purple-200' : ''}`}
                                             dangerouslySetInnerHTML={{
                                                 __html: rendered?.front?.slice(0, 100) || 'Loading...'
                                             }}
                                         />
+                                        {isGenerated && (
+                                            <span className="text-xs text-purple-400 flex-shrink-0">New</span>
+                                        )}
                                         {isAnalyzed && cachedResult && (
-                                            <div
-                                                className={`flex items-center gap-1 flex-shrink-0 ${cachedResult.feedback.overallScore >= 7 ? 'text-green-400' :
+                                            (cachedResult.error || cachedResult.feedback.overallScore === 0) ? (
+                                                <div
+                                                    className="flex items-center gap-1 flex-shrink-0 text-red-400"
+                                                    title={cachedResult.error ? `Error: ${cachedResult.error}` : 'Analysis failed'}
+                                                >
+                                                    <AlertCircle className="w-3.5 h-3.5" />
+                                                </div>
+                                            ) : (
+                                                <div
+                                                    className={`flex items-center gap-1 flex-shrink-0 ${
+                                                        cachedResult.feedback.overallScore >= 7 ? 'text-green-400' :
                                                         cachedResult.feedback.overallScore >= 4 ? 'text-yellow-400' : 'text-red-400'
                                                     }`}
-                                                title={`Analyzed: ${cachedResult.feedback.overallScore}/10`}
-                                            >
-                                                <CheckCircle className="w-3.5 h-3.5" />
-                                                <span className="text-xs">{cachedResult.feedback.overallScore}</span>
-                                            </div>
+                                                    title={`Analyzed: ${cachedResult.feedback.overallScore}/10`}
+                                                >
+                                                    <CheckCircle className="w-3.5 h-3.5" />
+                                                    <span className="text-xs">{cachedResult.feedback.overallScore}</span>
+                                                </div>
+                                            )
                                         )}
                                     </div>
                                     <div className="flex items-center gap-2 mt-1 text-xs text-gray-400">
-                                        <span className="px-1.5 py-0.5 bg-gray-700 rounded">
+                                        <span className={`px-1.5 py-0.5 rounded ${isGenerated ? 'bg-purple-800/50 text-purple-300' : 'bg-gray-700'}`}>
                                             {getCardTypeName(card.type)}
                                         </span>
                                         {rendered?.tags && rendered.tags.length > 0 && (

@@ -39,15 +39,12 @@ export const CardViewer: React.FC<CardViewerProps> = ({
             const clozeField = sc.fields.find(f => f.name.toLowerCase() === 'text' || f.name.toLowerCase() === 'front');
             const text = clozeField?.value || sc.fields[0]?.value || '';
 
-            // Show with cloze hidden on front
-            front = text.replace(/\{\{c\d+::([^}:]+)(?:::[^}]+)?\}\}/g, '<span class="cloze cloze-hint">[...]</span>');
-            back = text.replace(/\{\{c\d+::([^}:]+)(?:::[^}]+)?\}\}/g, '<span class="cloze">$1</span>');
-
-            // Add extra field if present
+            // Show the raw cloze text (user will see cloze syntax like {{c1::answer}})
+            front = text;
+            
+            // For "back"/Extra section, show the extra field if present, otherwise empty
             const extraField = sc.fields.find(f => f.name.toLowerCase() === 'extra' || f.name.toLowerCase() === 'back');
-            if (extraField?.value) {
-                back += `<hr><div class="extra">${extraField.value}</div>`;
-            }
+            back = extraField?.value || '<span class="text-gray-400 italic">No extra content</span>';
         } else {
             // Basic card
             const frontField = sc.fields.find(f => f.name.toLowerCase() === 'front');
@@ -84,7 +81,7 @@ export const CardViewer: React.FC<CardViewerProps> = ({
             {/* Front / Text */}
             <div className="p-4 border-b border-gray-700">
                 <div className="text-xs text-gray-400 uppercase tracking-wider mb-2">
-                    {cardType === 'cloze' ? 'Text (with cloze hidden)' : 'Front'}
+                    {cardType === 'cloze' ? 'Text' : 'Front'}
                 </div>
                 <div
                     className="prose prose-sm max-w-none bg-white text-gray-900 p-4 rounded-lg"
@@ -92,10 +89,10 @@ export const CardViewer: React.FC<CardViewerProps> = ({
                 />
             </div>
 
-            {/* Back / Answer */}
+            {/* Back / Extra */}
             <div className="p-4">
                 <div className="text-xs text-gray-400 uppercase tracking-wider mb-2">
-                    {cardType === 'cloze' ? 'Answer (with extra)' : 'Back'}
+                    {cardType === 'cloze' ? 'Extra (optional)' : 'Back'}
                 </div>
                 <div
                     className="prose prose-sm max-w-none bg-gray-100 text-gray-900 p-4 rounded-lg"

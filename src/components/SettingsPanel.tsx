@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
-import { Settings, X, Save, RotateCcw, Key, Server, MessageSquare, Info, ExternalLink, Image } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Settings, X, Save, RotateCcw, Key, Server, MessageSquare, Info, ExternalLink, Image, Layers, Zap, RefreshCw, Loader2 } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
-import { LLM_PROVIDERS, DEFAULT_SYSTEM_PROMPT, PROVIDER_INFO } from '../utils/llmService';
+import { LLM_PROVIDERS, DEFAULT_SYSTEM_PROMPT, PROVIDER_INFO, SYSTEM_PROMPT_VERSION, fetchProviderModels, clearModelCache, type ModelInfo } from '../utils/llmService';
 
 export const SettingsPanel: React.FC = () => {
     const showSettings = useAppStore(state => state.showSettings);
@@ -11,9 +11,70 @@ export const SettingsPanel: React.FC = () => {
 
     const [localConfig, setLocalConfig] = useState(llmConfig);
     const [showProviderInfo, setShowProviderInfo] = useState(false);
+    const [availableModels, setAvailableModels] = useState<ModelInfo[]>([]);
+    const [isLoadingModels, setIsLoadingModels] = useState(false);
+    const [modelsError, setModelsError] = useState<string | null>(null);
 
     const selectedProvider = LLM_PROVIDERS.find(p => p.id === localConfig.providerId);
     const providerInfo = PROVIDER_INFO[localConfig.providerId];
+
+    // Get current API key for the selected provider (with backwards compatibility)
+    const currentApiKey = localConfig.apiKeys?.[localConfig.providerId] || (localConfig as any).apiKey || '';
+
+    // Fetch models when provider or API key changes
+    const fetchModels = useCallback(async (forceRefresh = false) => {
+        if (!selectedProvider) return;
+
+        setIsLoadingModels(true);
+        setModelsError(null);
+
+        if (forceRefresh) {
+            clearModelCache(localConfig.providerId);
+        }
+
+        try {
+            const models = await fetchProviderModels(
+                localConfig.providerId,
+                currentApiKey,
+                selectedProvider.baseUrl
+            );
+            setAvailableModels(models);
+
+            // If current model is not in the list, select the first one
+            if (models.length > 0 && !models.find(m => m.id === localConfig.model)) {
+                setLocalConfig(prev => ({ ...prev, model: models[0].id }));
+            }
+        } catch (error) {
+            setModelsError('Failed to fetch models');
+            // Fall back to static list
+            setAvailableModels(selectedProvider.models.map(id => ({ id })));
+        } finally {
+            setIsLoadingModels(false);
+        }
+    }, [localConfig.providerId, currentApiKey, selectedProvider, localConfig.model]);
+
+    // Fetch models when provider changes or API key is entered
+    useEffect(() => {
+        // For providers that require API key, only fetch if key is present
+        if (selectedProvider?.requiresApiKey && !currentApiKey) {
+            // Show static list without fetching
+            setAvailableModels(selectedProvider.models.map(id => ({ id })));
+            return;
+        }
+        fetchModels();
+    }, [localConfig.providerId, currentApiKey, fetchModels, selectedProvider]);
+
+    const handleApiKeyChange = (value: string) => {
+        // Ensure apiKeys object exists (backwards compatibility)
+        const existingKeys = localConfig.apiKeys || {};
+        setLocalConfig({
+            ...localConfig,
+            apiKeys: {
+                ...existingKeys,
+                [localConfig.providerId]: value
+            }
+        });
+    };
 
     const handleSave = () => {
         setLLMConfig(localConfig);
@@ -21,7 +82,11 @@ export const SettingsPanel: React.FC = () => {
     };
 
     const handleResetPrompt = () => {
-        setLocalConfig({ ...localConfig, systemPrompt: DEFAULT_SYSTEM_PROMPT });
+        setLocalConfig({ 
+            ...localConfig, 
+            systemPrompt: DEFAULT_SYSTEM_PROMPT,
+            systemPromptVersion: SYSTEM_PROMPT_VERSION
+        });
     };
 
     if (!showSettings) return null;
@@ -110,20 +175,43 @@ export const SettingsPanel: React.FC = () => {
 
                     {/* Model */}
                     <div>
-                        <label className="block text-sm font-medium text-gray-300 mb-2">
+                        <label className="flex items-center gap-2 text-sm font-medium text-gray-300 mb-2">
                             Model
+                            <button
+                                onClick={() => fetchModels(true)}
+                                disabled={isLoadingModels}
+                                className="p-1 rounded-full hover:bg-gray-600 text-gray-400 transition-colors disabled:opacity-50"
+                                title="Refresh model list"
+                            >
+                                {isLoadingModels ? (
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                ) : (
+                                    <RefreshCw className="w-3.5 h-3.5" />
+                                )}
+                            </button>
                         </label>
                         <select
                             value={localConfig.model}
                             onChange={(e) => setLocalConfig({ ...localConfig, model: e.target.value })}
                             className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            disabled={isLoadingModels}
                         >
-                            {selectedProvider?.models.map(model => (
-                                <option key={model} value={model}>
-                                    {model}
+                            {availableModels.map(model => (
+                                <option key={model.id} value={model.id}>
+                                    {model.name || model.id}
+                                    {model.contextWindow ? ` (${Math.round(model.contextWindow / 1000)}k ctx)` : ''}
                                 </option>
                             ))}
                         </select>
+                        {modelsError && (
+                            <p className="mt-1 text-xs text-red-400">{modelsError}</p>
+                        )}
+                        {availableModels.length > 0 && !modelsError && (
+                            <p className="mt-1 text-xs text-gray-400">
+                                {availableModels.length} models available
+                                {selectedProvider?.requiresApiKey && !currentApiKey && ' (enter API key to see all)'}
+                            </p>
+                        )}
                     </div>
 
                     {/* API Key */}
@@ -131,17 +219,17 @@ export const SettingsPanel: React.FC = () => {
                         <div>
                             <label className="flex items-center gap-2 text-sm font-medium text-gray-300 mb-2">
                                 <Key className="w-4 h-4" />
-                                API Key
+                                API Key for {selectedProvider.name}
                             </label>
                             <input
                                 type="text"
-                                value={localConfig.apiKey}
-                                onChange={(e) => setLocalConfig({ ...localConfig, apiKey: e.target.value })}
+                                value={currentApiKey}
+                                onChange={(e) => handleApiKeyChange(e.target.value)}
                                 placeholder={`Enter your ${selectedProvider.name} API key`}
                                 className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                             />
                             <p className="mt-1 text-xs text-gray-400">
-                                Your API key is stored locally in your browser and never sent to any server except the LLM provider.
+                                API keys are stored per provider. Your key is stored locally and only sent to {selectedProvider.name}.
                             </p>
                         </div>
                     )}
@@ -161,7 +249,45 @@ export const SettingsPanel: React.FC = () => {
                             />
                         </label>
                         <p className="mt-1 text-xs text-gray-400">
-                            When enabled, image references are included in the prompt. Disable to save tokens (images will show as [IMAGE OMITTED]).
+                            When enabled, images are converted to base64 and sent for visual analysis. When disabled, image tags are preserved but content is not analyzed.
+                        </p>
+                    </div>
+
+                    {/* Concurrent Deck Analysis Toggle */}
+                    <div>
+                        <label className="flex items-center gap-3 cursor-pointer">
+                            <div className="flex items-center gap-2 text-sm font-medium text-gray-300">
+                                <Zap className="w-4 h-4" />
+                                Concurrent Deck Analysis
+                            </div>
+                            <input
+                                type="checkbox"
+                                checked={localConfig.concurrentDeckAnalysis}
+                                onChange={(e) => setLocalConfig({ ...localConfig, concurrentDeckAnalysis: e.target.checked })}
+                                className="rounded border-gray-600 bg-gray-700 text-blue-500 focus:ring-blue-500"
+                            />
+                        </label>
+                        <p className="mt-1 text-xs text-gray-400">
+                            When enabled, multiple cards are analyzed simultaneously (faster but uses more API calls at once). When disabled, cards are analyzed one at a time (slower but more controlled).
+                        </p>
+                    </div>
+
+                    {/* Max Cards for Deck Analysis */}
+                    <div>
+                        <label className="flex items-center gap-2 text-sm font-medium text-gray-300 mb-2">
+                            <Layers className="w-4 h-4" />
+                            Max Cards for Deck Analysis
+                        </label>
+                        <input
+                            type="number"
+                            min={1}
+                            max={500}
+                            value={localConfig.maxDeckAnalysisCards}
+                            onChange={(e) => setLocalConfig({ ...localConfig, maxDeckAnalysisCards: Math.max(1, Math.min(500, parseInt(e.target.value) || 50)) })}
+                            className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                        <p className="mt-1 text-xs text-gray-400">
+                            Maximum number of cards to analyze when running deck-level analysis (1-500). Higher values provide more comprehensive analysis but cost more API calls.
                         </p>
                     </div>
 

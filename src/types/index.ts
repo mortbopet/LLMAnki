@@ -90,9 +90,12 @@ export interface LLMProvider {
 export interface LLMConfig {
   providerId: string;
   model: string;
-  apiKey: string;
+  apiKeys: Record<string, string>; // Per-provider API keys
   systemPrompt: string;
+  systemPromptVersion?: number; // Track which version of the default prompt the user has
   sendImages: boolean;
+  maxDeckAnalysisCards: number;
+  concurrentDeckAnalysis: boolean;
 }
 
 export interface CardFeedback {
@@ -117,9 +120,23 @@ export interface LLMAnalysisResult {
   suggestedCards: SuggestedCard[];
   deleteOriginal: boolean;
   deleteReason?: string;
+  error?: string;
 }
 
 // UI State
+export interface UndoableAction {
+  type: 'add-card' | 'delete-card';
+  // For add-card: the card and note that were added
+  cardId?: number;
+  noteId?: number;
+  card?: AnkiCard;
+  note?: AnkiNote;
+  // For delete-card: the card and note that were deleted
+  deletedCard?: AnkiCard;
+  deletedNote?: AnkiNote;
+  deckId: number;
+}
+
 export interface CardChange {
   type: 'add' | 'delete' | 'modify';
   originalCardId?: number;
@@ -142,6 +159,9 @@ export interface DeckAnalysisResult {
   averageScore: number;
   scoreDistribution: { score: number; count: number }[];
   commonIssues: { issue: string; count: number }[];
+  classifiedIssues: { category: string; issues: { issue: string; count: number }[] }[];
   deckSummary: string;
   suggestedNewCards: SuggestedCard[];
+  totalSuggestedFromCards: number;
+  error?: string;
 }

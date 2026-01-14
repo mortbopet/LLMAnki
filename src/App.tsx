@@ -1,13 +1,16 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
     Sparkles,
     Settings,
     Download,
     Wand2,
     Loader2,
-    AlertCircle,
     BookOpen,
-    Layers
+    Layers,
+    StopCircle,
+    Info,
+    Undo2,
+    Redo2
 } from 'lucide-react';
 import { useAppStore } from './store/useAppStore';
 import { FileUpload } from './components/FileUpload';
@@ -17,10 +20,12 @@ import { CardViewer } from './components/CardViewer';
 import { AnalysisPanel } from './components/AnalysisPanel';
 import { DeckAnalysisPanel } from './components/DeckAnalysisPanel';
 import { SettingsPanel } from './components/SettingsPanel';
-import { PendingChanges } from './components/PendingChanges';
 import { ToastContainer } from './components/ToastContainer';
-import { analyzeCard, analyzeDeck } from './utils/llmService';
+import { SystemPromptUpdateModal } from './components/SystemPromptUpdateModal';
+import { ErrorDisplay } from './components/ErrorDisplay';
+import { analyzeCard, analyzeDeck, getApiKey, DEFAULT_SYSTEM_PROMPT, SYSTEM_PROMPT_VERSION } from './utils/llmService';
 import { exportCollection, getCardsInDeck } from './utils/ankiParser';
+import type { DeckAnalysisResult } from './types';
 
 function App() {
     const collection = useAppStore(state => state.collection);
@@ -31,25 +36,169 @@ function App() {
     const isAnalyzing = useAppStore(state => state.isAnalyzing);
     const analysisError = useAppStore(state => state.analysisError);
     const llmConfig = useAppStore(state => state.llmConfig);
+    const setLLMConfig = useAppStore(state => state.setLLMConfig);
     const setShowSettings = useAppStore(state => state.setShowSettings);
     const setAnalysisResult = useAppStore(state => state.setAnalysisResult);
     const setIsAnalyzing = useAppStore(state => state.setIsAnalyzing);
     const setAnalysisError = useAppStore(state => state.setAnalysisError);
     const cacheAnalysis = useAppStore(state => state.cacheAnalysis);
-    const deckAnalysisResult = useAppStore(state => state.deckAnalysisResult);
-    const isDeckAnalyzing = useAppStore(state => state.isDeckAnalyzing);
+    const analysisCache = useAppStore(state => state.analysisCache);
+    
+    // New deck analysis state
+    const deckAnalysisCache = useAppStore(state => state.deckAnalysisCache);
+    const analyzingDeckId = useAppStore(state => state.analyzingDeckId);
     const deckAnalysisProgress = useAppStore(state => state.deckAnalysisProgress);
-    const setDeckAnalysisResult = useAppStore(state => state.setDeckAnalysisResult);
-    const setIsDeckAnalyzing = useAppStore(state => state.setIsDeckAnalyzing);
+    const cacheDeckAnalysis = useAppStore(state => state.cacheDeckAnalysis);
+    const setAnalyzingDeckId = useAppStore(state => state.setAnalyzingDeckId);
     const setDeckAnalysisProgress = useAppStore(state => state.setDeckAnalysisProgress);
+    const cancelDeckAnalysis = useAppStore(state => state.cancelDeckAnalysis);
+    const isDeckAnalysisCancelled = useAppStore(state => state.isDeckAnalysisCancelled);
+    const resetDeckAnalysisCancelled = useAppStore(state => state.resetDeckAnalysisCancelled);
+    
+    // Undo/Redo
+    const undo = useAppStore(state => state.undo);
+    const redo = useAppStore(state => state.redo);
+    const canUndo = useAppStore(state => state.canUndo);
+    const canRedo = useAppStore(state => state.canRedo);
 
     const [additionalPrompt, setAdditionalPrompt] = useState('');
     const [deckAdditionalPrompt, setDeckAdditionalPrompt] = useState('');
+    const [showPromptUpdateModal, setShowPromptUpdateModal] = useState(false);
+
+    // Keyboard shortcuts for undo/redo
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            // Check for Ctrl+Z (undo) or Ctrl+Shift+Z / Ctrl+Y (redo)
+            if (e.ctrlKey || e.metaKey) {
+                if (e.key === 'z' && !e.shiftKey) {
+                    e.preventDefault();
+                    if (canUndo()) {
+                        undo();
+                    }
+                } else if ((e.key === 'z' && e.shiftKey) || e.key === 'y') {
+                    e.preventDefault();
+                    if (canRedo()) {
+                        redo();
+                    }
+                }
+            }
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [undo, redo, canUndo, canRedo]);
+
+    // Check for system prompt updates on mount
+    useEffect(() => {
+        // If user has a stored prompt version that's older than current, show the update modal
+        // Also show if version is undefined (old installs before versioning was added)
+        const storedVersion = llmConfig.systemPromptVersion;
+        const isOutdated = storedVersion === undefined || storedVersion < SYSTEM_PROMPT_VERSION;
+        
+        // Only show if they have an outdated version AND their prompt is different from default
+        // (If they already have the default prompt, just update the version silently)
+        if (isOutdated) {
+            if (llmConfig.systemPrompt === DEFAULT_SYSTEM_PROMPT) {
+                // Prompt is the same, just update the version silently
+                setLLMConfig({ systemPromptVersion: SYSTEM_PROMPT_VERSION });
+            } else {
+                // Prompt is different, ask the user what to do
+                setShowPromptUpdateModal(true);
+            }
+        }
+    }, []); // Only run on mount
+
+    const handleAcceptNewPrompt = () => {
+        setLLMConfig({
+            systemPrompt: DEFAULT_SYSTEM_PROMPT,
+            systemPromptVersion: SYSTEM_PROMPT_VERSION
+        });
+        setShowPromptUpdateModal(false);
+    };
+
+    const handleKeepOldPrompt = () => {
+        // Just update the version to acknowledge they've seen the update
+        setLLMConfig({ systemPromptVersion: SYSTEM_PROMPT_VERSION });
+        setShowPromptUpdateModal(false);
+    };
+
+    // Get cached result for current deck
+    const deckAnalysisResult = selectedDeckId !== null ? deckAnalysisCache.get(selectedDeckId) : undefined;
+    const isDeckAnalyzing = analyzingDeckId !== null;
+    const isCurrentDeckAnalyzing = analyzingDeckId === selectedDeckId;
+
+    // Compute dynamic deck stats from cached card analyses
+    const dynamicDeckStats = useMemo((): DeckAnalysisResult | null => {
+        if (!collection || selectedDeckId === null) return null;
+        
+        // If we have a full deck analysis result, prefer that
+        if (deckAnalysisResult) return deckAnalysisResult;
+        
+        // Otherwise, compute stats from individual card analyses
+        const cards = getCardsInDeck(collection, selectedDeckId, true);
+        if (cards.length === 0) return null;
+        
+        const analyzedCards: { cardId: number; score: number; issues: string[]; suggestions: number }[] = [];
+        
+        for (const card of cards) {
+            const cached = analysisCache.get(card.id);
+            if (cached) {
+                analyzedCards.push({
+                    cardId: card.id,
+                    score: cached.feedback.overallScore,
+                    issues: cached.feedback.issues,
+                    suggestions: cached.suggestedCards?.length ?? 0
+                });
+            }
+        }
+        
+        if (analyzedCards.length === 0) return null;
+        
+        // Compute score distribution
+        const scoreDistribution: { score: number; count: number }[] = [];
+        for (let s = 1; s <= 10; s++) {
+            scoreDistribution.push({
+                score: s,
+                count: analyzedCards.filter(a => Math.floor(a.score) === s).length
+            });
+        }
+        
+        // Compute common issues
+        const issueCounts = new Map<string, number>();
+        for (const { issues } of analyzedCards) {
+            for (const issue of issues) {
+                issueCounts.set(issue, (issueCounts.get(issue) || 0) + 1);
+            }
+        }
+        const commonIssues = Array.from(issueCounts.entries())
+            .map(([issue, count]) => ({ issue, count }))
+            .sort((a, b) => b.count - a.count)
+            .slice(0, 10);
+        
+        const avgScore = analyzedCards.reduce((sum, a) => sum + a.score, 0) / analyzedCards.length;
+        const totalSuggestions = analyzedCards.reduce((sum, a) => sum + a.suggestions, 0);
+        
+        const deck = collection.decks.get(selectedDeckId);
+        
+        return {
+            deckId: selectedDeckId,
+            deckName: deck?.name || 'Unknown Deck',
+            totalCards: cards.length,
+            analyzedCards: analyzedCards.length,
+            averageScore: Math.round(avgScore * 10) / 10,
+            scoreDistribution,
+            commonIssues,
+            classifiedIssues: [],
+            deckSummary: '',
+            suggestedNewCards: [],
+            totalSuggestedFromCards: totalSuggestions
+        };
+    }, [collection, selectedDeckId, analysisCache, deckAnalysisResult]);
 
     const handleAnalyze = useCallback(async () => {
         if (!selectedCard || !selectedCardId) return;
 
-        if (!llmConfig.apiKey && llmConfig.providerId !== 'ollama') {
+        if (!getApiKey(llmConfig) && llmConfig.providerId !== 'ollama') {
             setAnalysisError('Please configure your API key in Settings first.');
             return;
         }
@@ -63,7 +212,24 @@ function App() {
             cacheAnalysis(selectedCardId, result);
         } catch (error) {
             console.error('Analysis failed:', error);
-            setAnalysisError(error instanceof Error ? error.message : 'Analysis failed');
+            const errorMessage = error instanceof Error ? error.message : 'Analysis failed';
+            setAnalysisError(errorMessage);
+            // Cache the error so it shows in the card list
+            cacheAnalysis(selectedCardId, {
+                feedback: {
+                    isUnambiguous: false,
+                    isAtomic: false,
+                    isRecognizable: false,
+                    isActiveRecall: false,
+                    overallScore: 0,
+                    issues: [],
+                    suggestions: [],
+                    reasoning: ''
+                },
+                suggestedCards: [],
+                deleteOriginal: false,
+                error: errorMessage
+            });
         } finally {
             setIsAnalyzing(false);
         }
@@ -72,7 +238,13 @@ function App() {
     const handleDeckAnalyze = useCallback(async () => {
         if (!collection || selectedDeckId === null) return;
 
-        if (!llmConfig.apiKey && llmConfig.providerId !== 'ollama') {
+        // Prevent concurrent analysis
+        if (analyzingDeckId !== null) {
+            setAnalysisError('Another deck analysis is already in progress. Please wait or stop it first.');
+            return;
+        }
+
+        if (!getApiKey(llmConfig) && llmConfig.providerId !== 'ollama') {
             setAnalysisError('Please configure your API key in Settings first.');
             return;
         }
@@ -86,8 +258,9 @@ function App() {
             return;
         }
 
-        setIsDeckAnalyzing(true);
-        setDeckAnalysisProgress({ current: 0, total: cards.length });
+        resetDeckAnalysisCancelled();
+        setAnalyzingDeckId(selectedDeckId);
+        setDeckAnalysisProgress({ current: 0, total: Math.min(cards.length, llmConfig.maxDeckAnalysisCards) });
         setAnalysisError(null);
 
         try {
@@ -102,17 +275,29 @@ function App() {
                     if (cardId && cardResult) {
                         cacheAnalysis(cardId, cardResult);
                     }
-                }
+                },
+                isDeckAnalysisCancelled,
+                analysisCache  // Pass existing cache to skip already-analyzed cards
             );
-            setDeckAnalysisResult(result);
+            
+            // Only cache if not cancelled
+            if (!isDeckAnalysisCancelled()) {
+                cacheDeckAnalysis(selectedDeckId, result);
+            }
         } catch (error) {
             console.error('Deck analysis failed:', error);
-            setAnalysisError(error instanceof Error ? error.message : 'Deck analysis failed');
+            if (!isDeckAnalysisCancelled()) {
+                setAnalysisError(error instanceof Error ? error.message : 'Deck analysis failed');
+            }
         } finally {
-            setIsDeckAnalyzing(false);
+            setAnalyzingDeckId(null);
             setDeckAnalysisProgress(null);
         }
-    }, [collection, selectedDeckId, llmConfig, deckAdditionalPrompt, setIsDeckAnalyzing, setDeckAnalysisProgress, setDeckAnalysisResult, setAnalysisError, cacheAnalysis]);
+    }, [collection, selectedDeckId, analyzingDeckId, llmConfig, deckAdditionalPrompt, setAnalyzingDeckId, setDeckAnalysisProgress, cacheDeckAnalysis, setAnalysisError, cacheAnalysis, isDeckAnalysisCancelled, resetDeckAnalysisCancelled]);
+
+    const handleStopDeckAnalysis = useCallback(() => {
+        cancelDeckAnalysis();
+    }, [cancelDeckAnalysis]);
 
     const handleExport = useCallback(async () => {
         if (!collection) return;
@@ -150,21 +335,62 @@ function App() {
                         <FileUpload />
 
                         {collection && (
-                            <button
-                                onClick={handleExport}
-                                className="flex items-center gap-2 px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors"
-                            >
-                                <Download className="w-4 h-4" />
-                                <span className="hidden sm:inline text-sm">Export</span>
-                            </button>
+                            <>
+                                {/* Undo/Redo buttons */}
+                                <div className="flex items-center border-r border-gray-600 pr-2 mr-1">
+                                    <button
+                                        onClick={undo}
+                                        disabled={!canUndo()}
+                                        className={`p-2 rounded-lg transition-colors ${
+                                            canUndo() 
+                                                ? 'hover:bg-gray-700 text-gray-300' 
+                                                : 'text-gray-600 cursor-not-allowed'
+                                        }`}
+                                        title="Undo (Ctrl+Z)"
+                                    >
+                                        <Undo2 className="w-4 h-4" />
+                                    </button>
+                                    <button
+                                        onClick={redo}
+                                        disabled={!canRedo()}
+                                        className={`p-2 rounded-lg transition-colors ${
+                                            canRedo() 
+                                                ? 'hover:bg-gray-700 text-gray-300' 
+                                                : 'text-gray-600 cursor-not-allowed'
+                                        }`}
+                                        title="Redo (Ctrl+Y)"
+                                    >
+                                        <Redo2 className="w-4 h-4" />
+                                    </button>
+                                </div>
+
+                                <button
+                                    onClick={handleExport}
+                                    className="flex items-center gap-2 px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors"
+                                >
+                                    <Download className="w-4 h-4" />
+                                    <span className="hidden sm:inline text-sm">Export</span>
+                                </button>
+                            </>
                         )}
 
                         <button
                             onClick={() => setShowSettings(true)}
                             className="p-2 hover:bg-gray-700 rounded-lg transition-colors"
+                            title="Settings"
                         >
                             <Settings className="w-5 h-5" />
                         </button>
+
+                        <a
+                            href="https://github.com/mortbopet/LLMAnki"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="p-2 hover:bg-gray-700 rounded-lg transition-colors"
+                            title="About LLMAnki"
+                        >
+                            <Info className="w-5 h-5" />
+                        </a>
                     </div>
                 </div>
             </header>
@@ -198,12 +424,12 @@ function App() {
                                 {/* Analyze Button with Additional Prompt */}
                                 <div className="flex flex-col items-center gap-3">
                                     <div className="flex items-center gap-3">
-                                        <input
-                                            type="text"
+                                        <textarea
                                             value={additionalPrompt}
                                             onChange={(e) => setAdditionalPrompt(e.target.value)}
                                             placeholder="Optional: specific instructions..."
-                                            className="px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-sm focus:outline-none focus:border-blue-500 w-64"
+                                            rows={2}
+                                            className="px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-sm focus:outline-none focus:border-blue-500 w-64 resize-none"
                                         />
                                         <button
                                             onClick={handleAnalyze}
@@ -227,22 +453,16 @@ function App() {
 
                                 {/* Error Message */}
                                 {analysisError && (
-                                    <div className="flex items-start gap-3 p-4 bg-red-900/30 border border-red-700 rounded-lg">
-                                        <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
-                                        <div>
-                                            <p className="font-medium text-red-400">Analysis Error</p>
-                                            <p className="text-sm text-gray-300 mt-1">{analysisError}</p>
-                                        </div>
-                                    </div>
+                                    <ErrorDisplay 
+                                        error={analysisError} 
+                                        onDismiss={() => setAnalysisError(null)}
+                                    />
                                 )}
 
                                 {/* Analysis Results */}
                                 {analysisResult && (
                                     <AnalysisPanel result={analysisResult} />
                                 )}
-
-                                {/* Pending Changes */}
-                                <PendingChanges />
                             </div>
                         </div>
                     ) : selectedDeckId !== null && collection ? (
@@ -268,53 +488,61 @@ function App() {
                                 {/* Deck Analyze Button with Additional Prompt */}
                                 <div className="flex flex-col items-center gap-3">
                                     <div className="flex items-center gap-3">
-                                        <input
-                                            type="text"
+                                        <textarea
                                             value={deckAdditionalPrompt}
                                             onChange={(e) => setDeckAdditionalPrompt(e.target.value)}
                                             placeholder="Optional: focus area or topic..."
-                                            className="px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-sm focus:outline-none focus:border-blue-500 w-64"
-                                        />
-                                        <button
-                                            onClick={handleDeckAnalyze}
+                                            rows={2}
+                                            className="px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-sm focus:outline-none focus:border-blue-500 w-64 resize-none"
                                             disabled={isDeckAnalyzing}
-                                            className="flex items-center gap-2 px-6 py-2 bg-gradient-to-r from-green-600 to-teal-600 hover:from-green-700 hover:to-teal-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg font-medium transition-all shadow-lg hover:shadow-xl"
-                                        >
-                                            {isDeckAnalyzing ? (
-                                                <>
-                                                    <Loader2 className="w-5 h-5 animate-spin" />
-                                                    Analyzing Deck...
-                                                    {deckAnalysisProgress && (
-                                                        <span className="text-sm">({deckAnalysisProgress.current}/{deckAnalysisProgress.total})</span>
-                                                    )}
-                                                </>
-                                            ) : (
-                                                <>
-                                                    <Wand2 className="w-5 h-5" />
-                                                    Analyze Deck
-                                                </>
-                                            )}
-                                        </button>
+                                        />
+                                        {isCurrentDeckAnalyzing ? (
+                                            <button
+                                                onClick={handleStopDeckAnalysis}
+                                                className="flex items-center gap-2 px-6 py-2 bg-gradient-to-r from-red-600 to-orange-600 hover:from-red-700 hover:to-orange-700 rounded-lg font-medium transition-all shadow-lg hover:shadow-xl"
+                                            >
+                                                <StopCircle className="w-5 h-5" />
+                                                Stop Analysis
+                                                {deckAnalysisProgress && (
+                                                    <span className="text-sm">({deckAnalysisProgress.current}/{deckAnalysisProgress.total})</span>
+                                                )}
+                                            </button>
+                                        ) : (
+                                            <button
+                                                onClick={handleDeckAnalyze}
+                                                disabled={isDeckAnalyzing}
+                                                className="flex items-center gap-2 px-6 py-2 bg-gradient-to-r from-green-600 to-teal-600 hover:from-green-700 hover:to-teal-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg font-medium transition-all shadow-lg hover:shadow-xl"
+                                            >
+                                                {isDeckAnalyzing ? (
+                                                    <>
+                                                        <Loader2 className="w-5 h-5 animate-spin" />
+                                                        Other Deck Analyzing...
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <Wand2 className="w-5 h-5" />
+                                                        Analyze Deck
+                                                    </>
+                                                )}
+                                            </button>
+                                        )}
                                     </div>
                                     <p className="text-xs text-gray-400">
-                                        Analyzes all cards in the deck and generates statistics + new card suggestions
+                                        Analyzes up to {llmConfig.maxDeckAnalysisCards} cards in the deck and generates statistics + new card suggestions
                                     </p>
                                 </div>
 
                                 {/* Error Message */}
                                 {analysisError && (
-                                    <div className="flex items-start gap-3 p-4 bg-red-900/30 border border-red-700 rounded-lg">
-                                        <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
-                                        <div>
-                                            <p className="font-medium text-red-400">Analysis Error</p>
-                                            <p className="text-sm text-gray-300 mt-1">{analysisError}</p>
-                                        </div>
-                                    </div>
+                                    <ErrorDisplay 
+                                        error={analysisError} 
+                                        onDismiss={() => setAnalysisError(null)}
+                                    />
                                 )}
 
-                                {/* Deck Analysis Results */}
-                                {deckAnalysisResult && deckAnalysisResult.deckId === selectedDeckId && (
-                                    <DeckAnalysisPanel result={deckAnalysisResult} />
+                                {/* Deck Analysis Results - Show dynamic stats or full analysis */}
+                                {dynamicDeckStats && (
+                                    <DeckAnalysisPanel result={dynamicDeckStats} />
                                 )}
                             </div>
                         </div>
@@ -336,6 +564,14 @@ function App() {
 
             {/* Settings Modal */}
             <SettingsPanel />
+
+            {/* System Prompt Update Modal */}
+            {showPromptUpdateModal && (
+                <SystemPromptUpdateModal
+                    onAcceptNew={handleAcceptNewPrompt}
+                    onKeepOld={handleKeepOldPrompt}
+                />
+            )}
 
             {/* Toast Notifications */}
             <ToastContainer />

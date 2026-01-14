@@ -1,4 +1,4 @@
-# LLMAnki - AI-Powered Anki Card Improvement
+# LLMAnki - AI-Powered Anki Deck Improvement
 
 LLMAnki is a web application that helps you improve your Anki flashcards using Large Language Models (LLMs). It analyzes your cards against evidence-based learning principles and suggests improvements.
 
@@ -57,13 +57,14 @@ npm run dev
 
 - **OpenAI**: [platform.openai.com](https://platform.openai.com)
 - **Anthropic**: [console.anthropic.com](https://console.anthropic.com)
-- **Groq**: [console.groq.com](https://console.groq.com) - Free tier available!
+- **Groq**: [console.groq.com](https://console.groq.com) - Free tier available
 - **Together AI**: [api.together.xyz](https://api.together.xyz)
 - **OpenRouter**: [openrouter.ai](https://openrouter.ai) - Aggregates multiple providers
 
 ## Card Analysis Criteria
 
-The AI evaluates cards based on these principles:
+The AI evaluates cards based on these principles. They are encoded into the system prompt that is sent to the LLM alongside the card content.
+The system prompt can be adjusted in the settings to tailor the analysis to your own preferences.
 
 ### 1. Unambiguous
 The question should have only one reasonable answer. Avoid vague or open-ended questions.
@@ -83,42 +84,6 @@ Cards should require genuine recall, not just recognition. The answer shouldn't 
 - **Description → Term**: Use Jeopardy-style cards
 - **Concepts, formulas, lists**: Use cloze deletions
 
-## Tech Stack
-
-- **React 18** with TypeScript
-- **Vite** for fast development
-- **Tailwind CSS** for styling
-- **sql.js** for SQLite in browser
-- **JSZip** for handling .apkg files
-- **Zustand** for state management
-- **Lucide React** for icons
-
-## Project Structure
-
-```
-src/
-├── components/          # React components
-│   ├── AnalysisPanel.tsx
-│   ├── CardEditor.tsx
-│   ├── CardList.tsx
-│   ├── CardViewer.tsx
-│   ├── DeckBrowser.tsx
-│   ├── FileUpload.tsx
-│   ├── PendingChanges.tsx
-│   └── SettingsPanel.tsx
-├── store/
-│   └── useAppStore.ts   # Zustand state management
-├── types/
-│   └── index.ts         # TypeScript types
-├── utils/
-│   ├── ankiParser.ts    # APKG file parsing
-│   ├── cardRenderer.ts  # Card rendering logic
-│   └── llmService.ts    # LLM API integration
-├── App.tsx              # Main application
-├── main.tsx             # Entry point
-└── index.css            # Global styles
-```
-
 ## Development
 
 ```bash
@@ -127,12 +92,6 @@ npm run dev
 
 # Build for production
 npm run build
-
-# Preview production build
-npm run preview
-
-# Lint code
-npm run lint
 ```
 
 ## Notes
@@ -140,7 +99,6 @@ npm run lint
 - API keys are stored locally in your browser's localStorage
 - The app runs entirely in your browser - no backend required
 - Large decks may take a moment to load as SQLite parsing happens in-browser
-- Images in cards are preserved when analyzing and editing
 
 ## License
 

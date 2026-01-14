@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { 
   CheckCircle, 
   XCircle, 
@@ -7,12 +7,11 @@ import {
   Star,
   ThumbsUp,
   ThumbsDown,
-  Edit3,
   Trash2,
   Plus
 } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
-import { CardViewer } from './CardViewer';
+import { CardCarousel } from './CardCarousel';
 import { CardEditor } from './CardEditor';
 import type { LLMAnalysisResult, SuggestedCard } from '../types';
 
@@ -39,10 +38,16 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ result }) => {
   const removeSuggestedCard = useAppStore(state => state.removeSuggestedCard);
   const editingSuggestionIndex = useAppStore(state => state.editingSuggestionIndex);
   const setEditingSuggestionIndex = useAppStore(state => state.setEditingSuggestionIndex);
-  const addPendingChange = useAppStore(state => state.addPendingChange);
+  const addCardToDeck = useAppStore(state => state.addCardToDeck);
+  const deleteCard = useAppStore(state => state.deleteCard);
   const selectedCard = useAppStore(state => state.selectedCard);
+  const selectedDeckId = useAppStore(state => state.selectedDeckId);
+  
+  // Track carousel position to persist across edit/save cycles
+  const [carouselIndex, setCarouselIndex] = useState(0);
   
   const handleEditCard = (index: number) => {
+    setCarouselIndex(index); // Remember where we were
     setEditingSuggestionIndex(index);
   };
   
@@ -51,22 +56,15 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ result }) => {
     setEditingSuggestionIndex(null);
   };
   
-  const handleCommitCard = (card: SuggestedCard) => {
-    addPendingChange({
-      type: 'add',
-      originalCardId: selectedCard?.id,
-      newCard: card,
-      committed: false
-    });
+  const handleAddCard = (card: SuggestedCard) => {
+    if (selectedDeckId !== null) {
+      addCardToDeck(card, selectedDeckId);
+    }
   };
   
   const handleDeleteOriginal = () => {
     if (selectedCard) {
-      addPendingChange({
-        type: 'delete',
-        originalCardId: selectedCard.id,
-        committed: false
-      });
+      deleteCard(selectedCard.id);
     }
   };
   
@@ -111,7 +109,7 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ result }) => {
             {feedback.issues.map((issue, index) => (
               <li key={index} className="flex items-start gap-2 text-sm">
                 <ThumbsDown className="w-4 h-4 text-red-400 mt-0.5 flex-shrink-0" />
-                <span className="text-gray-300">{issue}</span>
+                <span className="text-gray-300">{typeof issue === 'string' ? issue : JSON.stringify(issue)}</span>
               </li>
             ))}
           </ul>
@@ -129,7 +127,7 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ result }) => {
             {feedback.suggestions.map((suggestion, index) => (
               <li key={index} className="flex items-start gap-2 text-sm">
                 <ThumbsUp className="w-4 h-4 text-green-400 mt-0.5 flex-shrink-0" />
-                <span className="text-gray-300">{suggestion}</span>
+                <span className="text-gray-300">{typeof suggestion === 'string' ? suggestion : JSON.stringify(suggestion)}</span>
               </li>
             ))}
           </ul>
@@ -140,7 +138,16 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ result }) => {
       {feedback.reasoning && (
         <div className="bg-gray-800 rounded-lg p-4">
           <h3 className="font-semibold mb-3">Detailed Analysis</h3>
-          <p className="text-sm text-gray-300 whitespace-pre-wrap">{feedback.reasoning}</p>
+          {feedback.reasoning.startsWith('Failed to parse LLM response. Raw response:') ? (
+            <>
+              <p className="text-sm text-red-400 mb-2">Failed to parse LLM response. Raw response:</p>
+              <pre className="text-sm text-gray-300 whitespace-pre-wrap bg-gray-900 p-3 rounded-lg border border-gray-700 overflow-x-auto font-mono">
+                {feedback.reasoning.replace('Failed to parse LLM response. Raw response:\n\n', '')}
+              </pre>
+            </>
+          ) : (
+            <p className="text-sm text-gray-300 whitespace-pre-wrap">{feedback.reasoning}</p>
+          )}
         </div>
       )}
       
@@ -162,7 +169,7 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ result }) => {
         </div>
       )}
       
-      {/* Suggested Cards */}
+      {/* Suggested Cards - Using Swiper Carousel */}
       {displayCards.length > 0 && (
         <div className="space-y-4">
           <h3 className="font-semibold flex items-center gap-2">
@@ -170,58 +177,24 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ result }) => {
             Suggested Replacement Cards ({displayCards.length})
           </h3>
           
-          {displayCards.map((card, index) => (
-            <div key={index} className="relative">
-              {editingSuggestionIndex === index ? (
-                <CardEditor
-                  card={card}
-                  onChange={(updated) => updateSuggestedCard(index, updated)}
-                  onCancel={() => setEditingSuggestionIndex(null)}
-                  onSave={() => handleSaveEdit(index, card)}
-                />
-              ) : (
-                <div className="relative group">
-                  <CardViewer
-                    card={card}
-                    title={`Suggested Card ${index + 1}`}
-                    isSuggestion
-                  />
-                  
-                  {/* Action buttons */}
-                  <div className="absolute top-2 right-2 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button
-                      onClick={() => handleEditCard(index)}
-                      className="p-2 bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors"
-                      title="Edit card"
-                    >
-                      <Edit3 className="w-4 h-4" />
-                    </button>
-                    <button
-                      onClick={() => removeSuggestedCard(index)}
-                      className="p-2 bg-gray-700 hover:bg-red-600 rounded-lg transition-colors"
-                      title="Remove suggestion"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                    <button
-                      onClick={() => handleCommitCard(card)}
-                      className="px-3 py-2 bg-green-600 hover:bg-green-700 rounded-lg transition-colors text-sm font-medium"
-                      title="Add to deck"
-                    >
-                      <Plus className="w-4 h-4 inline mr-1" />
-                      Add
-                    </button>
-                  </div>
-                </div>
-              )}
-              
-              {card.explanation && editingSuggestionIndex !== index && (
-                <p className="mt-2 text-sm text-gray-400 italic">
-                  💡 {card.explanation}
-                </p>
-              )}
-            </div>
-          ))}
+          {editingSuggestionIndex !== null ? (
+            <CardEditor
+              card={displayCards[editingSuggestionIndex]}
+              onChange={(updated) => updateSuggestedCard(editingSuggestionIndex, updated)}
+              onCancel={() => setEditingSuggestionIndex(null)}
+              onSave={() => handleSaveEdit(editingSuggestionIndex, displayCards[editingSuggestionIndex])}
+            />
+          ) : (
+            <CardCarousel
+              cards={displayCards}
+              onAddCard={(card) => handleAddCard(card)}
+              onEditCard={(index) => handleEditCard(index)}
+              onRemoveCard={(index) => removeSuggestedCard(index)}
+              titlePrefix="Suggested Card"
+              initialSlide={carouselIndex}
+              onSlideChange={setCarouselIndex}
+            />
+          )}
         </div>
       )}
     </div>

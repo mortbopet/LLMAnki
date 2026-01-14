@@ -1,6 +1,8 @@
-import React, { useMemo } from 'react';
-import { ChevronRight, ChevronDown, Folder, FolderOpen, CreditCard } from 'lucide-react';
+import React, { useMemo, useRef, useCallback } from 'react';
+import { ChevronRight, ChevronDown, Folder, FolderOpen, CreditCard, Loader2 } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
+import { parseApkgFile } from '../utils/ankiParser';
+import { useToastStore } from '../store/useToastStore';
 import type { AnkiDeck } from '../types';
 
 interface DeckNodeProps {
@@ -14,10 +16,12 @@ const DeckNode: React.FC<DeckNodeProps> = ({ deck, level, expanded, onToggle }) 
     const selectedDeckId = useAppStore(state => state.selectedDeckId);
     const selectDeck = useAppStore(state => state.selectDeck);
     const collection = useAppStore(state => state.collection);
+    const analyzingDeckId = useAppStore(state => state.analyzingDeckId);
 
     const isExpanded = expanded.has(deck.id);
     const isSelected = selectedDeckId === deck.id;
     const hasChildren = deck.children.length > 0;
+    const isAnalyzing = analyzingDeckId === deck.id;
 
     // Get all deck IDs including this deck and all descendants
     const getAllDeckIds = (d: AnkiDeck): number[] => {
@@ -74,6 +78,12 @@ const DeckNode: React.FC<DeckNodeProps> = ({ deck, level, expanded, onToggle }) 
 
                 <span className="flex-1 truncate text-sm">{displayName}</span>
 
+                {isAnalyzing && (
+                    <span title="Analyzing deck...">
+                        <Loader2 className="w-4 h-4 text-blue-400 animate-spin" />
+                    </span>
+                )}
+
                 {totalCount > 0 && (
                     <span className="flex items-center gap-1 text-xs text-gray-400" title={`${directCount} in this deck, ${totalCount} total including subdecks`}>
                         <CreditCard className="w-3 h-3" />
@@ -105,7 +115,45 @@ const DeckNode: React.FC<DeckNodeProps> = ({ deck, level, expanded, onToggle }) 
 
 export const DeckBrowser: React.FC = () => {
     const collection = useAppStore(state => state.collection);
+    const setCollection = useAppStore(state => state.setCollection);
+    const setIsLoadingCollection = useAppStore(state => state.setIsLoadingCollection);
+    const setLoadingProgress = useAppStore(state => state.setLoadingProgress);
+    const addToast = useToastStore(state => state.addToast);
     const [expanded, setExpanded] = React.useState<Set<number>>(new Set());
+    const fileInputRef = useRef<HTMLInputElement>(null);
+
+    const handleFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        setIsLoadingCollection(true);
+        setLoadingProgress('Reading file...');
+
+        try {
+            const collection = await parseApkgFile(file, (progress) => {
+                setLoadingProgress(progress);
+            });
+            setCollection(collection, file.name);
+            addToast({
+                type: 'success',
+                title: 'Deck loaded successfully',
+                message: `Found ${collection.decks.size} decks and ${collection.cards.size} cards`
+            });
+        } catch (error) {
+            console.error('Failed to parse APKG file:', error);
+            setIsLoadingCollection(false);
+            setLoadingProgress(null);
+            addToast({
+                type: 'error',
+                title: 'Failed to load deck',
+                message: error instanceof Error ? error.message : 'Unknown error'
+            });
+        }
+    }, [setCollection, addToast, setIsLoadingCollection, setLoadingProgress]);
+
+    const handleFolderClick = () => {
+        fileInputRef.current?.click();
+    };
 
     // Auto-expand all decks with children on initial load
     React.useEffect(() => {
@@ -138,9 +186,20 @@ export const DeckBrowser: React.FC = () => {
 
     if (!collection) {
         return (
-            <div className="flex flex-col items-center justify-center h-full text-gray-400 p-4">
-                <Folder className="w-12 h-12 mb-2 opacity-50" />
+            <div 
+                className="flex flex-col items-center justify-center h-full text-gray-400 p-4 cursor-pointer hover:text-gray-300 transition-colors"
+                onClick={handleFolderClick}
+            >
+                <Folder className="w-12 h-12 mb-2 opacity-50 hover:opacity-75 transition-opacity" />
                 <p className="text-sm text-center">Load an Anki deck to browse cards</p>
+                <p className="text-xs text-center mt-1 text-blue-400">Click to open file browser</p>
+                <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".apkg"
+                    onChange={handleFileChange}
+                    className="hidden"
+                />
             </div>
         );
     }

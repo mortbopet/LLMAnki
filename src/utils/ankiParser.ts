@@ -182,8 +182,11 @@ function determineCardType(model: AnkiModel): CardType {
   return 'basic';
 }
 
-export async function parseApkgFile(file: File): Promise<AnkiCollection> {
+export async function parseApkgFile(file: File, onProgress?: (progress: string) => void): Promise<AnkiCollection> {
+  onProgress?.('Loading SQL.js...');
   const sql = await getSql();
+  
+  onProgress?.('Extracting archive...');
   const zip = await JSZip.loadAsync(file);
   
   const allFiles = Object.keys(zip.files);
@@ -208,6 +211,7 @@ export async function parseApkgFile(file: File): Promise<AnkiCollection> {
     throw new Error('Invalid .apkg file: missing collection database. Files found: ' + allFiles.join(', '));
   }
   
+  onProgress?.('Reading collection database...');
   let collectionData = await collectionFile.async('arraybuffer');
   let dbData = new Uint8Array(collectionData);
   
@@ -216,6 +220,7 @@ export async function parseApkgFile(file: File): Promise<AnkiCollection> {
   if (collectionFile.name.endsWith('.anki21b') || 
       (dbData.length >= 4 && dbData[0] === 0x28 && dbData[1] === 0xB5 && dbData[2] === 0x2F && dbData[3] === 0xFD)) {
     try {
+      onProgress?.('Decompressing database...');
       dbData = decompress(dbData);
     } catch (e) {
       console.error('Failed to decompress:', e);
@@ -223,9 +228,11 @@ export async function parseApkgFile(file: File): Promise<AnkiCollection> {
     }
   }
   
+  onProgress?.('Parsing database...');
   const db = new sql.Database(dbData);
   
   // Parse media
+  onProgress?.('Loading media files...');
   const media = new Map<string, Blob>();
   const allZipFiles = Object.keys(zip.files);
   
@@ -353,6 +360,7 @@ export async function parseApkgFile(file: File): Promise<AnkiCollection> {
   }
   
   // Parse collection metadata - handle both old and new Anki formats
+  onProgress?.('Parsing deck structure...');
   let models: Map<number, AnkiModel>;
   let decks: Map<number, AnkiDeck>;
   
@@ -477,6 +485,7 @@ export async function parseApkgFile(file: File): Promise<AnkiCollection> {
   const deckTree = buildDeckTree(decks);
   
   // Parse notes - check which columns exist
+  onProgress?.('Parsing notes...');
   const notes = new Map<number, AnkiNote>();
   
   // Get notes table schema to handle both old (mid) and new (ntid) formats
@@ -515,6 +524,7 @@ export async function parseApkgFile(file: File): Promise<AnkiCollection> {
   }
   
   // Parse cards
+  onProgress?.('Parsing cards...');
   const cards = new Map<number, AnkiCard>();
   const cardsResult = db.exec('SELECT id, nid, did, ord, type, queue, due, ivl, factor, reps, lapses FROM cards');
   
@@ -541,6 +551,7 @@ export async function parseApkgFile(file: File): Promise<AnkiCollection> {
     }
   }
   
+  onProgress?.('Finalizing...');
   db.close();
   
   return {
