@@ -11,16 +11,16 @@ interface ErrorDisplayProps {
 // Parse error string to extract LLMError-like info
 function parseErrorString(error: string): { type: LLMErrorType; message: string } {
     const lowerError = error.toLowerCase();
-    
-    if (lowerError.includes('rate limit') || lowerError.includes('rate_limit') || 
+
+    if (lowerError.includes('rate limit') || lowerError.includes('rate_limit') ||
         lowerError.includes('too many requests') || lowerError.includes('429')) {
         return { type: 'rate_limit', message: error };
     }
-    if (lowerError.includes('unauthorized') || lowerError.includes('invalid api key') || 
+    if (lowerError.includes('unauthorized') || lowerError.includes('invalid api key') ||
         lowerError.includes('authentication') || lowerError.includes('401')) {
         return { type: 'auth_error', message: error };
     }
-    if (lowerError.includes('econnrefused') || lowerError.includes('network') || 
+    if (lowerError.includes('econnrefused') || lowerError.includes('network') ||
         lowerError.includes('failed to fetch')) {
         return { type: 'connection_error', message: error };
     }
@@ -30,7 +30,7 @@ function parseErrorString(error: string): { type: LLMErrorType; message: string 
     if (lowerError.includes('context length') || lowerError.includes('token limit')) {
         return { type: 'context_length_exceeded', message: error };
     }
-    
+
     return { type: 'unknown', message: error };
 }
 
@@ -56,42 +56,40 @@ const errorTitles: Record<LLMErrorType, string> = {
 
 export const ErrorDisplay: React.FC<ErrorDisplayProps> = ({ error, onDismiss }) => {
     const setShowSettings = useAppStore(state => state.setShowSettings);
-    
+
     const [showDetails, setShowDetails] = useState(true); // Expanded by default
-    
+
     // Determine error type and info
     const isLLMError = typeof error !== 'string' && 'type' in error;
     const errorType = isLLMError ? error.type : parseErrorString(error as string).type;
     const errorMessage = isLLMError ? error.message : error;
     const suggestion = isLLMError ? error.suggestion : undefined;
     const retryAfter = isLLMError ? error.retryAfter : undefined;
-    
+
     const handleOpenSettings = () => {
         setShowSettings(true);
     };
-    
+
     return (
-        <div className={`rounded-lg border p-4 ${
-            errorType === 'rate_limit' ? 'bg-yellow-900/30 border-yellow-700' :
-            errorType === 'auth_error' ? 'bg-red-900/30 border-red-700' :
-            errorType === 'connection_error' ? 'bg-orange-900/30 border-orange-700' :
-            'bg-red-900/30 border-red-700'
-        }`}>
+        <div className={`rounded-lg border p-4 ${errorType === 'rate_limit' ? 'bg-yellow-900/30 border-yellow-700' :
+                errorType === 'auth_error' ? 'bg-red-900/30 border-red-700' :
+                    errorType === 'connection_error' ? 'bg-orange-900/30 border-orange-700' :
+                        'bg-red-900/30 border-red-700'
+            }`}>
             <div className="flex items-start gap-3">
                 <div className="flex-shrink-0 mt-0.5">
                     {errorIcons[errorType]}
                 </div>
                 <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between">
-                        <p className={`font-medium ${
-                            errorType === 'rate_limit' ? 'text-yellow-400' :
-                            errorType === 'connection_error' ? 'text-orange-400' :
-                            'text-red-400'
-                        }`}>
+                        <p className={`font-medium ${errorType === 'rate_limit' ? 'text-yellow-400' :
+                                errorType === 'connection_error' ? 'text-orange-400' :
+                                    'text-red-400'
+                            }`}>
                             {errorTitles[errorType]}
                         </p>
                         {onDismiss && (
-                            <button 
+                            <button
                                 onClick={onDismiss}
                                 className="text-gray-400 hover:text-white text-sm"
                             >
@@ -99,19 +97,19 @@ export const ErrorDisplay: React.FC<ErrorDisplayProps> = ({ error, onDismiss }) 
                             </button>
                         )}
                     </div>
-                    
+
                     {/* Suggestion */}
                     {suggestion && (
                         <p className="text-sm text-gray-300 mt-1">{suggestion}</p>
                     )}
-                    
+
                     {/* Retry after info */}
                     {retryAfter && (
                         <p className="text-sm text-gray-400 mt-1">
                             You can retry in {retryAfter} seconds.
                         </p>
                     )}
-                    
+
                     {/* Action buttons */}
                     <div className="flex items-center gap-2 mt-3">
                         {errorType === 'auth_error' && (
@@ -122,7 +120,7 @@ export const ErrorDisplay: React.FC<ErrorDisplayProps> = ({ error, onDismiss }) 
                                 Open Settings
                             </button>
                         )}
-                        
+
                         {/* Show details toggle */}
                         <button
                             onClick={() => setShowDetails(!showDetails)}
@@ -132,7 +130,7 @@ export const ErrorDisplay: React.FC<ErrorDisplayProps> = ({ error, onDismiss }) 
                             {showDetails ? 'Hide details' : 'Show details'}
                         </button>
                     </div>
-                    
+
                     {/* Full error details */}
                     {showDetails && (
                         <pre className="mt-2 p-2 bg-gray-900 rounded text-xs text-gray-400 overflow-x-auto whitespace-pre-wrap">

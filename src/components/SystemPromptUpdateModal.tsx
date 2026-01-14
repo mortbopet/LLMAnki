@@ -24,14 +24,14 @@ export const SystemPromptUpdateModal: React.FC<SystemPromptUpdateModalProps> = (
                 {/* Content */}
                 <div className="p-6 space-y-4">
                     <p className="text-gray-300">
-                        The default system prompt has been updated in this version of the app. 
+                        The default system prompt has been updated in this version of the app.
                         Your current settings are using an older version of the prompt.
                     </p>
-                    
+
                     <p className="text-gray-400 text-sm">
                         You can either:
                     </p>
-                    
+
                     <ul className="text-sm text-gray-400 space-y-2 ml-4">
                         <li className="flex items-start gap-2">
                             <span className="text-green-400 font-bold">•</span>
@@ -42,7 +42,7 @@ export const SystemPromptUpdateModal: React.FC<SystemPromptUpdateModalProps> = (
                             <span><strong className="text-blue-400">Keep your current prompt</strong> — If you've customized it and want to preserve your changes</span>
                         </li>
                     </ul>
-                    
+
                     <p className="text-gray-500 text-xs italic">
                         You can always reset to the default prompt later in Settings.
                     </p>

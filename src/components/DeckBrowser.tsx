@@ -186,7 +186,7 @@ export const DeckBrowser: React.FC = () => {
 
     if (!collection) {
         return (
-            <div 
+            <div
                 className="flex flex-col items-center justify-center h-full text-gray-400 p-4 cursor-pointer hover:text-gray-300 transition-colors"
                 onClick={handleFolderClick}
             >

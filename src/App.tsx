@@ -43,7 +43,7 @@ function App() {
     const setAnalysisError = useAppStore(state => state.setAnalysisError);
     const cacheAnalysis = useAppStore(state => state.cacheAnalysis);
     const analysisCache = useAppStore(state => state.analysisCache);
-    
+
     // New deck analysis state
     const deckAnalysisCache = useAppStore(state => state.deckAnalysisCache);
     const analyzingDeckId = useAppStore(state => state.analyzingDeckId);
@@ -54,7 +54,7 @@ function App() {
     const cancelDeckAnalysis = useAppStore(state => state.cancelDeckAnalysis);
     const isDeckAnalysisCancelled = useAppStore(state => state.isDeckAnalysisCancelled);
     const resetDeckAnalysisCancelled = useAppStore(state => state.resetDeckAnalysisCancelled);
-    
+
     // Undo/Redo
     const undo = useAppStore(state => state.undo);
     const redo = useAppStore(state => state.redo);
@@ -94,7 +94,7 @@ function App() {
         // Also show if version is undefined (old installs before versioning was added)
         const storedVersion = llmConfig.systemPromptVersion;
         const isOutdated = storedVersion === undefined || storedVersion < SYSTEM_PROMPT_VERSION;
-        
+
         // Only show if they have an outdated version AND their prompt is different from default
         // (If they already have the default prompt, just update the version silently)
         if (isOutdated) {
@@ -130,16 +130,16 @@ function App() {
     // Compute dynamic deck stats from cached card analyses
     const dynamicDeckStats = useMemo((): DeckAnalysisResult | null => {
         if (!collection || selectedDeckId === null) return null;
-        
+
         // If we have a full deck analysis result, prefer that
         if (deckAnalysisResult) return deckAnalysisResult;
-        
+
         // Otherwise, compute stats from individual card analyses
         const cards = getCardsInDeck(collection, selectedDeckId, true);
         if (cards.length === 0) return null;
-        
+
         const analyzedCards: { cardId: number; score: number; issues: string[]; suggestions: number }[] = [];
-        
+
         for (const card of cards) {
             const cached = analysisCache.get(card.id);
             if (cached) {
@@ -151,9 +151,9 @@ function App() {
                 });
             }
         }
-        
+
         if (analyzedCards.length === 0) return null;
-        
+
         // Compute score distribution
         const scoreDistribution: { score: number; count: number }[] = [];
         for (let s = 1; s <= 10; s++) {
@@ -162,7 +162,7 @@ function App() {
                 count: analyzedCards.filter(a => Math.floor(a.score) === s).length
             });
         }
-        
+
         // Compute common issues
         const issueCounts = new Map<string, number>();
         for (const { issues } of analyzedCards) {
@@ -174,12 +174,12 @@ function App() {
             .map(([issue, count]) => ({ issue, count }))
             .sort((a, b) => b.count - a.count)
             .slice(0, 10);
-        
+
         const avgScore = analyzedCards.reduce((sum, a) => sum + a.score, 0) / analyzedCards.length;
         const totalSuggestions = analyzedCards.reduce((sum, a) => sum + a.suggestions, 0);
-        
+
         const deck = collection.decks.get(selectedDeckId);
-        
+
         return {
             deckId: selectedDeckId,
             deckName: deck?.name || 'Unknown Deck',
@@ -279,7 +279,7 @@ function App() {
                 isDeckAnalysisCancelled,
                 analysisCache  // Pass existing cache to skip already-analyzed cards
             );
-            
+
             // Only cache if not cancelled
             if (!isDeckAnalysisCancelled()) {
                 cacheDeckAnalysis(selectedDeckId, result);
@@ -341,11 +341,10 @@ function App() {
                                     <button
                                         onClick={undo}
                                         disabled={!canUndo()}
-                                        className={`p-2 rounded-lg transition-colors ${
-                                            canUndo() 
-                                                ? 'hover:bg-gray-700 text-gray-300' 
+                                        className={`p-2 rounded-lg transition-colors ${canUndo()
+                                                ? 'hover:bg-gray-700 text-gray-300'
                                                 : 'text-gray-600 cursor-not-allowed'
-                                        }`}
+                                            }`}
                                         title="Undo (Ctrl+Z)"
                                     >
                                         <Undo2 className="w-4 h-4" />
@@ -353,11 +352,10 @@ function App() {
                                     <button
                                         onClick={redo}
                                         disabled={!canRedo()}
-                                        className={`p-2 rounded-lg transition-colors ${
-                                            canRedo() 
-                                                ? 'hover:bg-gray-700 text-gray-300' 
+                                        className={`p-2 rounded-lg transition-colors ${canRedo()
+                                                ? 'hover:bg-gray-700 text-gray-300'
                                                 : 'text-gray-600 cursor-not-allowed'
-                                        }`}
+                                            }`}
                                         title="Redo (Ctrl+Y)"
                                     >
                                         <Redo2 className="w-4 h-4" />
@@ -453,8 +451,8 @@ function App() {
 
                                 {/* Error Message */}
                                 {analysisError && (
-                                    <ErrorDisplay 
-                                        error={analysisError} 
+                                    <ErrorDisplay
+                                        error={analysisError}
                                         onDismiss={() => setAnalysisError(null)}
                                     />
                                 )}
@@ -534,8 +532,8 @@ function App() {
 
                                 {/* Error Message */}
                                 {analysisError && (
-                                    <ErrorDisplay 
-                                        error={analysisError} 
+                                    <ErrorDisplay
+                                        error={analysisError}
                                         onDismiss={() => setAnalysisError(null)}
                                     />
                                 )}

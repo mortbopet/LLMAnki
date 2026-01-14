@@ -65,7 +65,7 @@ export const DeckAnalysisPanel: React.FC<DeckAnalysisPanelProps> = ({ result }) 
                     </div>
                     <div className="bg-gray-700 rounded-lg p-3 text-center">
                         <div className={`text-2xl font-bold ${result.averageScore >= 7 ? 'text-green-400' :
-                                result.averageScore >= 5 ? 'text-yellow-400' : 'text-red-400'
+                            result.averageScore >= 5 ? 'text-yellow-400' : 'text-red-400'
                             }`}>
                             {result.averageScore}/10
                         </div>
@@ -110,7 +110,7 @@ export const DeckAnalysisPanel: React.FC<DeckAnalysisPanelProps> = ({ result }) 
                                     )}
                                     <div
                                         className={`w-full rounded-t transition-all ${score >= 7 ? 'bg-green-500' :
-                                                score >= 4 ? 'bg-yellow-500' : 'bg-red-500'
+                                            score >= 4 ? 'bg-yellow-500' : 'bg-red-500'
                                             }`}
                                         style={{
                                             height: `${heightPercent}%`,

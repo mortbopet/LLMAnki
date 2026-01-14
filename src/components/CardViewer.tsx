@@ -41,7 +41,7 @@ export const CardViewer: React.FC<CardViewerProps> = ({
 
             // Show the raw cloze text (user will see cloze syntax like {{c1::answer}})
             front = text;
-            
+
             // For "back"/Extra section, show the extra field if present, otherwise empty
             const extraField = sc.fields.find(f => f.name.toLowerCase() === 'extra' || f.name.toLowerCase() === 'back');
             back = extraField?.value || '<span class="text-gray-400 italic">No extra content</span>';

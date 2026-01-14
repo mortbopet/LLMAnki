@@ -82,8 +82,8 @@ export const SettingsPanel: React.FC = () => {
     };
 
     const handleResetPrompt = () => {
-        setLocalConfig({ 
-            ...localConfig, 
+        setLocalConfig({
+            ...localConfig,
             systemPrompt: DEFAULT_SYSTEM_PROMPT,
             systemPromptVersion: SYSTEM_PROMPT_VERSION
         });

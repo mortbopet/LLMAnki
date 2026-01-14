@@ -167,11 +167,10 @@ export const CardList: React.FC = () => {
                     return (
                         <div
                             key={card.id}
-                            className={`p-2 rounded cursor-pointer transition-colors ${
-                                isSelected ? 'bg-blue-600' : 
-                                isGenerated ? 'hover:bg-purple-700/50 bg-purple-900/30 border border-purple-700/50' :
-                                'hover:bg-gray-700 bg-gray-800'
-                            }`}
+                            className={`p-2 rounded cursor-pointer transition-colors ${isSelected ? 'bg-blue-600' :
+                                    isGenerated ? 'hover:bg-purple-700/50 bg-purple-900/30 border border-purple-700/50' :
+                                        'hover:bg-gray-700 bg-gray-800'
+                                }`}
                             onClick={() => handleSelectCard(card)}
                         >
                             <div className="flex items-start gap-2">
@@ -201,10 +200,9 @@ export const CardList: React.FC = () => {
                                                 </div>
                                             ) : (
                                                 <div
-                                                    className={`flex items-center gap-1 flex-shrink-0 ${
-                                                        cachedResult.feedback.overallScore >= 7 ? 'text-green-400' :
-                                                        cachedResult.feedback.overallScore >= 4 ? 'text-yellow-400' : 'text-red-400'
-                                                    }`}
+                                                    className={`flex items-center gap-1 flex-shrink-0 ${cachedResult.feedback.overallScore >= 7 ? 'text-green-400' :
+                                                            cachedResult.feedback.overallScore >= 4 ? 'text-yellow-400' : 'text-red-400'
+                                                        }`}
                                                     title={`Analyzed: ${cachedResult.feedback.overallScore}/10`}
                                                 >
                                                     <CheckCircle className="w-3.5 h-3.5" />

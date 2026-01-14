@@ -67,13 +67,13 @@ export const CardCarousel: React.FC<CardCarouselProps> = ({
                                 title={`${titlePrefix} ${index + 1}`}
                                 isSuggestion
                             />
-                            
+
                             {card.explanation && (
                                 <p className="mt-2 text-sm text-gray-400 italic px-1">
                                     {card.explanation}
                                 </p>
                             )}
-                            
+
                             {/* Action buttons */}
                             {showActions && (
                                 <div className="absolute top-2 right-2 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity z-10">
@@ -111,7 +111,7 @@ export const CardCarousel: React.FC<CardCarouselProps> = ({
                     </SwiperSlide>
                 ))}
             </Swiper>
-            
+
             <style>{`
                 .card-carousel-container {
                     position: relative;
