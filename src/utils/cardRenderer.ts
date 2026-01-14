@@ -1,4 +1,4 @@
-import type { AnkiCollection, AnkiCard, AnkiNote, AnkiModel, RenderedCard, CardType } from '../types';
+import type { AnkiCollection, AnkiCard, RenderedCard, CardType } from '../types';
 
 // Replace Anki field references like {{FieldName}} with actual values
 function replaceFields(template: string, fields: { name: string; value: string }[]): string {
@@ -34,7 +34,7 @@ function processCloze(text: string, clozeOrdinal: number, showAnswer: boolean): 
   // Match {{c1::answer::hint}} or {{c1::answer}}
   const clozeRegex = /\{\{c(\d+)::([^}]+?)(?:::([^}]+))?\}\}/g;
   
-  result = result.replace(clozeRegex, (match, num, answer, hint) => {
+  result = result.replace(clozeRegex, (_match, num, answer, hint) => {
     const clozeNum = parseInt(num);
     
     if (clozeNum === clozeOrdinal) {
@@ -61,16 +61,50 @@ export async function processMediaReferences(
   let result = html;
   
   // Find all img src references
-  const imgRegex = /<img[^>]+src=["']([^"']+)["']/gi;
+  const imgRegex = /<img([^>]*)src=["']([^"']+)["']([^>]*)>/gi;
   const matches = [...result.matchAll(imgRegex)];
   
   for (const match of matches) {
-    const filename = match[1];
-    const blob = media.get(filename);
+    const [fullMatch, beforeSrc, filename, afterSrc] = match;
+    
+    // Try exact match first
+    let blob = media.get(filename);
+    
+    // If not found, try fuzzy matching
+    if (!blob) {
+      // Try adding common prefixes (some Anki exports add digit prefixes)
+      for (let i = 0; i <= 9; i++) {
+        blob = media.get(`${i}${filename}`);
+        if (blob) break;
+      }
+    }
+    
+    // Try finding by hash (the long hex string part)
+    if (!blob) {
+      const hashMatch = filename.match(/([a-f0-9]{32,})/i);
+      if (hashMatch) {
+        const hash = hashMatch[1];
+        for (const [key, value] of media.entries()) {
+          if (key.includes(hash)) {
+            blob = value;
+            break;
+          }
+        }
+      }
+    }
     
     if (blob) {
       const dataUrl = await blobToDataUrl(blob);
-      result = result.replace(match[0], match[0].replace(filename, dataUrl));
+      result = result.replace(fullMatch, `<img${beforeSrc}src="${dataUrl}"${afterSrc}>`);
+    } else {
+      // Replace missing image with a placeholder
+      result = result.replace(
+        fullMatch, 
+        `<div class="missing-media" style="display:inline-flex;align-items:center;gap:4px;padding:8px 12px;background:#374151;border:1px dashed #6b7280;border-radius:4px;color:#9ca3af;font-size:12px;">
+          <span>🖼️</span>
+          <span title="${filename}">${filename.length > 30 ? filename.slice(0, 30) + '...' : filename}</span>
+        </div>`
+      );
     }
   }
   
@@ -79,10 +113,9 @@ export async function processMediaReferences(
   result = result.replace(soundRegex, (match, filename) => {
     const blob = media.get(filename);
     if (blob) {
-      // For audio, we'll create an audio element placeholder
-      return `<span class="sound-reference" data-filename="${filename}">🔊 ${filename}</span>`;
+      return `<span class="sound-reference" style="display:inline-flex;align-items:center;gap:4px;padding:4px 8px;background:#374151;border-radius:4px;color:#9ca3af;font-size:12px;">🔊 ${filename}</span>`;
     }
-    return match;
+    return `<span class="missing-media" style="display:inline-flex;align-items:center;gap:4px;padding:4px 8px;background:#374151;border:1px dashed #6b7280;border-radius:4px;color:#9ca3af;font-size:12px;">🔇 ${filename}</span>`;
   });
   
   return result;
@@ -102,15 +135,73 @@ export async function renderCard(
 ): Promise<RenderedCard> {
   const note = collection.notes.get(card.noteId);
   if (!note) {
-    throw new Error(`Note not found for card ${card.id}`);
+    // Return a placeholder for missing notes
+    return {
+      id: card.id,
+      noteId: card.noteId,
+      deckId: card.deckId,
+      deckName: collection.decks.get(card.deckId)?.name || 'Unknown',
+      modelName: 'Unknown',
+      type: 'basic',
+      front: '<span class="warning">⚠️ Note not found</span>',
+      back: '<span class="warning">Note data is missing</span>',
+      fields: [],
+      tags: [],
+      css: ''
+    };
   }
   
   const model = collection.models.get(note.modelId);
-  if (!model) {
-    throw new Error(`Model not found for note ${note.id}`);
-  }
-  
   const deck = collection.decks.get(card.deckId);
+  
+  // If model not found, create a fallback rendering from raw fields
+  if (!model) {
+    console.warn(`Model ${note.modelId} not found for note ${note.id}, using fallback rendering`);
+    
+    // Check if it looks like a cloze card (has {{c1::...}} pattern)
+    const firstField = note.fields[0] || '';
+    const isCloze = /\{\{c\d+::/.test(firstField);
+    
+    if (isCloze) {
+      // Render as cloze
+      const clozeOrdinal = card.ordinal + 1;
+      const front = processCloze(firstField, clozeOrdinal, false);
+      const back = processCloze(firstField, clozeOrdinal, true);
+      const extra = note.fields[1] || '';
+      
+      return {
+        id: card.id,
+        noteId: card.noteId,
+        deckId: card.deckId,
+        deckName: deck?.name || 'Unknown',
+        modelName: `Unknown Model (${note.modelId})`,
+        type: 'cloze',
+        front: await processMediaReferences(front, collection.media),
+        back: await processMediaReferences(back + (extra ? `<hr><div class="extra">${extra}</div>` : ''), collection.media),
+        fields: note.fields.map((value, i) => ({ name: `Field ${i + 1}`, value })),
+        tags: note.tags,
+        css: ''
+      };
+    } else {
+      // Render as basic card - first field is front, second is back
+      const front = note.fields[0] || '(empty)';
+      const back = note.fields[1] || note.fields[0] || '(empty)';
+      
+      return {
+        id: card.id,
+        noteId: card.noteId,
+        deckId: card.deckId,
+        deckName: deck?.name || 'Unknown',
+        modelName: `Unknown Model (${note.modelId})`,
+        type: 'basic',
+        front: await processMediaReferences(front, collection.media),
+        back: await processMediaReferences(back, collection.media),
+        fields: note.fields.map((value, i) => ({ name: `Field ${i + 1}`, value })),
+        tags: note.tags,
+        css: ''
+      };
+    }
+  }
   
   // Build field map
   const fields = model.fields.map((field, index) => ({
@@ -137,11 +228,13 @@ export async function renderCard(
     // Standard card type
     const template = model.templates[card.ordinal];
     if (!template) {
-      throw new Error(`Template not found for card ordinal ${card.ordinal}`);
+      // Fallback: just show fields directly
+      front = fields[0]?.value || '(empty)';
+      back = fields[1]?.value || fields[0]?.value || '(empty)';
+    } else {
+      front = replaceFields(template.questionFormat, fields);
+      back = replaceFields(template.answerFormat, fields);
     }
-    
-    front = replaceFields(template.questionFormat, fields);
-    back = replaceFields(template.answerFormat, fields);
   }
   
   // Process media references

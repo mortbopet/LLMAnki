@@ -1,4 +1,5 @@
-import type { LLMProvider, LLMConfig, LLMAnalysisResult, RenderedCard } from '../types';
+import type { LLMProvider, LLMConfig, LLMAnalysisResult, RenderedCard, DeckAnalysisResult, AnkiDeck, AnkiCard, AnkiCollection, SuggestedCard } from '../types';
+import { renderCard } from './cardRenderer';
 
 export interface ProviderInfo {
   description: string;
@@ -105,18 +106,30 @@ A good Anki card should be:
 
 4. **Active Recall**: Requires genuine recall, not just recognition. Avoid questions where the answer can be guessed from the question.
 
-## Card Type Guidelines
+## Card Types and Their Fields
 
-- **Terminology/Definitions**: Use "What is X?" format
-- **Description → Term**: Use Jeopardy-style ("This process involves..." → "What is photosynthesis?")
-- **Concepts, formulas, lists, sentences**: Use cloze deletions
+### Basic Cards
+- **Fields**: "Front" (question) and "Back" (answer)
+- Use for simple Q&A pairs, definitions, terminology
+
+### Basic (and reversed card)
+- **Fields**: "Front" and "Back"
+- Creates two cards: Front→Back and Back→Front
+- Good for bidirectional associations
+
+### Cloze Cards
+- **Fields**: "Text" (contains cloze deletions) and "Extra" (optional additional info shown after answer)
+- Cloze deletions use format: {{c1::answer::optional hint}}
+- Multiple cloze deletions can use same number (c1) to hide together, or different numbers (c1, c2) for separate cards
+- Example Text field: "The {{c1::mitochondria}} is the {{c2::powerhouse}} of the cell"
+- The "Extra" field appears below the answer and is useful for context, images, or additional details
 
 ## Your Task
 
 Analyze the provided card and:
 1. Evaluate it against each criterion
 2. Provide specific, actionable feedback
-3. Suggest improved card(s) if needed
+3. Suggest improved card(s) if needed - USE THE CORRECT FIELD NAMES FOR THE CARD TYPE
 4. Recommend deletion of the original if your suggestions replace it completely
 
 ## Response Format
@@ -137,8 +150,12 @@ Respond with a JSON object in this exact format:
     {
       "type": "basic" | "cloze" | "basic-reversed",
       "fields": [
+        // For basic/basic-reversed:
         {"name": "Front", "value": "question text"},
         {"name": "Back", "value": "answer text"}
+        // For cloze:
+        // {"name": "Text", "value": "text with {{c1::cloze}} deletions"},
+        // {"name": "Extra", "value": "optional extra info"}
       ],
       "explanation": "why this card format works better"
     }
@@ -147,7 +164,7 @@ Respond with a JSON object in this exact format:
   "deleteReason": "explanation if deletion is recommended"
 }
 
-For cloze cards, use the format {{c1::answer::optional hint}} in the fields.
+IMPORTANT: For cloze cards, use fields named "Text" and "Extra" (not "Front" and "Back").
 Preserve any images by keeping the <img> tags exactly as they appear.
 Keep media references intact.`;
 
@@ -156,11 +173,12 @@ export function getDefaultConfig(): LLMConfig {
     providerId: 'groq',
     model: 'llama-3.3-70b-versatile',
     apiKey: '',
-    systemPrompt: DEFAULT_SYSTEM_PROMPT
+    systemPrompt: DEFAULT_SYSTEM_PROMPT,
+    sendImages: true
   };
 }
 
-function buildCardDescription(card: RenderedCard): string {
+function buildCardDescription(card: RenderedCard, sendImages: boolean = true): string {
   const lines = [
     `## Card Information`,
     `- **Type**: ${card.type}`,
@@ -173,34 +191,39 @@ function buildCardDescription(card: RenderedCard): string {
   ];
   
   if (card.type === 'cloze') {
-    lines.push('### Fields:');
+    lines.push('### Fields (Cloze Card):');
     for (const field of card.fields) {
       lines.push(`**${field.name}**:`);
-      lines.push(field.value);
+      lines.push(stripHtmlForLLM(field.value, sendImages));
       lines.push('');
     }
   } else {
     lines.push('### Front:');
-    lines.push(stripHtmlForLLM(card.front));
+    lines.push(stripHtmlForLLM(card.front, sendImages));
     lines.push('');
     lines.push('### Back:');
-    lines.push(stripHtmlForLLM(card.back));
+    lines.push(stripHtmlForLLM(card.back, sendImages));
     lines.push('');
     lines.push('### Raw Fields:');
     for (const field of card.fields) {
-      lines.push(`**${field.name}**: ${field.value}`);
+      lines.push(`**${field.name}**: ${stripHtmlForLLM(field.value, sendImages)}`);
     }
   }
   
   return lines.join('\n');
 }
 
-function stripHtmlForLLM(html: string): string {
+function stripHtmlForLLM(html: string, sendImages: boolean = true): string {
   // Keep img tags for context but simplify
   let text = html;
   
-  // Convert img tags to descriptive text
-  text = text.replace(/<img[^>]+src=["']([^"']+)["'][^>]*>/gi, '[IMAGE: $1]');
+  if (sendImages) {
+    // Convert img tags to descriptive text
+    text = text.replace(/<img[^>]+src=["']([^"']+)["'][^>]*>/gi, '[IMAGE: $1]');
+  } else {
+    // Remove image references entirely to save tokens
+    text = text.replace(/<img[^>]+>/gi, '[IMAGE OMITTED]');
+  }
   
   // Remove other HTML tags but keep content
   text = text.replace(/<[^>]+>/g, '');
@@ -213,19 +236,21 @@ function stripHtmlForLLM(html: string): string {
 
 export async function analyzeCard(
   card: RenderedCard,
-  config: LLMConfig
+  config: LLMConfig,
+  additionalPrompt?: string
 ): Promise<LLMAnalysisResult> {
   const provider = LLM_PROVIDERS.find(p => p.id === config.providerId);
   if (!provider) {
     throw new Error(`Unknown provider: ${config.providerId}`);
   }
   
-  const cardDescription = buildCardDescription(card);
+  const cardDescription = buildCardDescription(card, config.sendImages);
   
-  const messages = [
-    { role: 'system', content: config.systemPrompt },
-    { role: 'user', content: `Please analyze this Anki card and provide feedback:\n\n${cardDescription}` }
-  ];
+  let userMessage = `Please analyze this Anki card and provide feedback:\n\n${cardDescription}`;
+  
+  if (additionalPrompt?.trim()) {
+    userMessage += `\n\n## Additional Instructions\n${additionalPrompt.trim()}`;
+  }
   
   let response: Response;
   
@@ -244,7 +269,7 @@ export async function analyzeCard(
         max_tokens: 4096,
         system: config.systemPrompt,
         messages: [
-          { role: 'user', content: `Please analyze this Anki card and provide feedback:\n\n${cardDescription}` }
+          { role: 'user', content: userMessage }
         ]
       })
     });
@@ -272,6 +297,11 @@ export async function analyzeCard(
       headers['HTTP-Referer'] = window.location.origin;
       headers['X-Title'] = 'LLMAnki';
     }
+    
+    const messages = [
+      { role: 'system', content: config.systemPrompt },
+      { role: 'user', content: userMessage }
+    ];
     
     response = await fetch(`${provider.baseUrl}/chat/completions`, {
       method: 'POST',
@@ -340,5 +370,217 @@ function parseAnalysisResponse(content: string): LLMAnalysisResult {
       suggestedCards: [],
       deleteOriginal: false
     };
+  }
+}
+
+// Deck analysis function
+export async function analyzeDeck(
+  collection: AnkiCollection,
+  deck: AnkiDeck,
+  cards: AnkiCard[],
+  config: LLMConfig,
+  additionalPrompt?: string,
+  onProgress?: (current: number, total: number, cardId?: number, result?: LLMAnalysisResult) => void
+): Promise<DeckAnalysisResult> {
+  const results: { cardId: number; result: LLMAnalysisResult }[] = [];
+  
+  // Analyze cards (limit to first 50 for performance)
+  const cardsToAnalyze = cards.slice(0, 50);
+  
+  for (let i = 0; i < cardsToAnalyze.length; i++) {
+    const card = cardsToAnalyze[i];
+    onProgress?.(i + 1, cardsToAnalyze.length);
+    
+    try {
+      const renderedCard = await renderCard(collection, card);
+      const result = await analyzeCard(renderedCard, config);
+      results.push({ cardId: card.id, result });
+      onProgress?.(i + 1, cardsToAnalyze.length, card.id, result);
+    } catch (e) {
+      console.error(`Failed to analyze card ${card.id}:`, e);
+    }
+    
+    // Small delay to avoid rate limiting
+    await new Promise(r => setTimeout(r, 200));
+  }
+  
+  // Calculate statistics
+  const scores = results.map(r => r.result.feedback.overallScore);
+  const averageScore = scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : 0;
+  
+  // Score distribution
+  const scoreDistribution: { score: number; count: number }[] = [];
+  for (let score = 1; score <= 10; score++) {
+    scoreDistribution.push({
+      score,
+      count: scores.filter(s => Math.round(s) === score).length
+    });
+  }
+  
+  // Common issues
+  const issueCount = new Map<string, number>();
+  for (const { result } of results) {
+    for (const issue of result.feedback.issues) {
+      const normalized = issue.toLowerCase().slice(0, 50);
+      issueCount.set(normalized, (issueCount.get(normalized) || 0) + 1);
+    }
+  }
+  const commonIssues = Array.from(issueCount.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 10)
+    .map(([issue, count]) => ({ issue, count }));
+  
+  // Generate deck summary and suggestions using LLM
+  const summaryAndSuggestions = await generateDeckSummary(
+    collection,
+    deck,
+    results,
+    config,
+    additionalPrompt
+  );
+  
+  return {
+    deckId: deck.id,
+    deckName: deck.name,
+    totalCards: cards.length,
+    analyzedCards: results.length,
+    averageScore: Math.round(averageScore * 10) / 10,
+    scoreDistribution,
+    commonIssues,
+    deckSummary: summaryAndSuggestions.summary,
+    suggestedNewCards: summaryAndSuggestions.suggestedCards
+  };
+}
+
+async function generateDeckSummary(
+  collection: AnkiCollection,
+  deck: AnkiDeck,
+  results: { cardId: number; result: LLMAnalysisResult }[],
+  config: LLMConfig,
+  additionalPrompt?: string
+): Promise<{ summary: string; suggestedCards: SuggestedCard[] }> {
+  const provider = LLM_PROVIDERS.find(p => p.id === config.providerId);
+  if (!provider) {
+    return { summary: 'Unable to generate summary', suggestedCards: [] };
+  }
+  
+  // Build a summary of the deck contents
+  const sampleCards: string[] = [];
+  for (const { result } of results.slice(0, 10)) {
+    if (result.feedback.reasoning) {
+      sampleCards.push(result.feedback.reasoning.slice(0, 200));
+    }
+  }
+  
+  const allIssues = results.flatMap(r => r.result.feedback.issues);
+  const scores = results.map(r => r.result.feedback.overallScore);
+  const avgScore = scores.length > 0 ? (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(1) : 'N/A';
+  
+  const systemPrompt = `You are an expert Anki deck reviewer. Based on the analysis of individual cards in a deck, provide:
+1. A summary of what this deck covers (topics, concepts)
+2. Overall quality assessment
+3. Suggest 3-5 NEW cards that would complement this deck well
+
+Respond in JSON format:
+{
+  "summary": "A 2-3 paragraph summary of the deck contents and quality",
+  "suggestedCards": [
+    {
+      "type": "basic" | "cloze",
+      "fields": [
+        {"name": "Front" or "Text", "value": "..."},
+        {"name": "Back" or "Extra", "value": "..."}
+      ],
+      "explanation": "why this card would be valuable"
+    }
+  ]
+}`;
+
+  let userMessage = `Analyze this Anki deck and suggest improvements:
+
+Deck Name: ${deck.name}
+Total Cards Analyzed: ${results.length}
+Average Score: ${avgScore}/10
+
+Common Issues Found:
+${allIssues.slice(0, 20).map(i => `- ${i}`).join('\n')}
+
+Sample Card Analyses:
+${sampleCards.join('\n---\n')}`;
+
+  if (additionalPrompt?.trim()) {
+    userMessage += `\n\nUser's Focus/Request: ${additionalPrompt.trim()}`;
+  }
+
+  try {
+    let response: Response;
+    
+    if (config.providerId === 'anthropic') {
+      response = await fetch(`${provider.baseUrl}/messages`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': config.apiKey,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true'
+        },
+        body: JSON.stringify({
+          model: config.model,
+          max_tokens: 4096,
+          system: systemPrompt,
+          messages: [{ role: 'user', content: userMessage }]
+        })
+      });
+      
+      if (!response.ok) throw new Error('API error');
+      
+      const data = await response.json();
+      return parseDeckSummaryResponse(data.content[0].text);
+    } else {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (config.apiKey) headers['Authorization'] = `Bearer ${config.apiKey}`;
+      if (config.providerId === 'openrouter') {
+        headers['HTTP-Referer'] = window.location.origin;
+        headers['X-Title'] = 'LLMAnki';
+      }
+      
+      response = await fetch(`${provider.baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          model: config.model,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userMessage }
+          ],
+          temperature: 0.7,
+          max_tokens: 4096
+        })
+      });
+      
+      if (!response.ok) throw new Error('API error');
+      
+      const data = await response.json();
+      return parseDeckSummaryResponse(data.choices[0].message.content);
+    }
+  } catch (e) {
+    console.error('Failed to generate deck summary:', e);
+    return { summary: 'Unable to generate summary due to an error.', suggestedCards: [] };
+  }
+}
+
+function parseDeckSummaryResponse(content: string): { summary: string; suggestedCards: SuggestedCard[] } {
+  let jsonStr = content;
+  const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (jsonMatch) jsonStr = jsonMatch[1];
+  
+  try {
+    const parsed = JSON.parse(jsonStr.trim());
+    return {
+      summary: parsed.summary || 'No summary available',
+      suggestedCards: parsed.suggestedCards || []
+    };
+  } catch {
+    return { summary: content, suggestedCards: [] };
   }
 }

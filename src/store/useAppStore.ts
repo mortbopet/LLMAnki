@@ -2,12 +2,12 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { 
   AnkiCollection, 
-  AnkiCard, 
   RenderedCard, 
   LLMConfig, 
   LLMAnalysisResult,
   SuggestedCard,
-  CardChange
+  CardChange,
+  DeckAnalysisResult
 } from '../types';
 import { getDefaultConfig } from '../utils/llmService';
 
@@ -26,6 +26,14 @@ interface AppState {
   isAnalyzing: boolean;
   analysisError: string | null;
   
+  // Analysis cache (session only - not persisted)
+  analysisCache: Map<number, LLMAnalysisResult>;
+  
+  // Deck analysis state
+  deckAnalysisResult: DeckAnalysisResult | null;
+  isDeckAnalyzing: boolean;
+  deckAnalysisProgress: { current: number; total: number } | null;
+  
   // Pending changes
   pendingChanges: CardChange[];
   suggestedCards: SuggestedCard[];
@@ -42,6 +50,11 @@ interface AppState {
   setAnalysisResult: (result: LLMAnalysisResult | null) => void;
   setIsAnalyzing: (isAnalyzing: boolean) => void;
   setAnalysisError: (error: string | null) => void;
+  cacheAnalysis: (cardId: number, result: LLMAnalysisResult) => void;
+  getCachedAnalysis: (cardId: number) => LLMAnalysisResult | undefined;
+  setDeckAnalysisResult: (result: DeckAnalysisResult | null) => void;
+  setIsDeckAnalyzing: (isAnalyzing: boolean) => void;
+  setDeckAnalysisProgress: (progress: { current: number; total: number } | null) => void;
   setSuggestedCards: (cards: SuggestedCard[]) => void;
   updateSuggestedCard: (index: number, card: SuggestedCard) => void;
   removeSuggestedCard: (index: number) => void;
@@ -66,6 +79,10 @@ export const useAppStore = create<AppState>()(
       analysisResult: null,
       isAnalyzing: false,
       analysisError: null,
+      analysisCache: new Map(),
+      deckAnalysisResult: null,
+      isDeckAnalyzing: false,
+      deckAnalysisProgress: null,
       pendingChanges: [],
       suggestedCards: [],
       editingSuggestionIndex: null,
@@ -80,6 +97,8 @@ export const useAppStore = create<AppState>()(
         selectedCardId: null,
         selectedCard: null,
         analysisResult: null,
+        analysisCache: new Map(),
+        deckAnalysisResult: null,
         pendingChanges: [],
         suggestedCards: []
       }),
@@ -92,13 +111,17 @@ export const useAppStore = create<AppState>()(
         suggestedCards: []
       }),
       
-      selectCard: (cardId, renderedCard) => set({ 
-        selectedCardId: cardId,
-        selectedCard: renderedCard,
-        analysisResult: null,
-        suggestedCards: [],
-        editingSuggestionIndex: null
-      }),
+      selectCard: (cardId, renderedCard) => {
+        // Check if there's a cached analysis for this card
+        const cached = cardId ? get().analysisCache.get(cardId) : undefined;
+        set({ 
+          selectedCardId: cardId,
+          selectedCard: renderedCard,
+          analysisResult: cached || null,
+          suggestedCards: cached?.suggestedCards || [],
+          editingSuggestionIndex: null
+        });
+      },
       
       setAnalysisResult: (result) => set({ 
         analysisResult: result,
@@ -108,6 +131,22 @@ export const useAppStore = create<AppState>()(
       setIsAnalyzing: (isAnalyzing) => set({ isAnalyzing }),
       
       setAnalysisError: (error) => set({ analysisError: error }),
+      
+      cacheAnalysis: (cardId, result) => {
+        const cache = new Map(get().analysisCache);
+        cache.set(cardId, result);
+        set({ analysisCache: cache });
+      },
+      
+      getCachedAnalysis: (cardId) => {
+        return get().analysisCache.get(cardId);
+      },
+      
+      setDeckAnalysisResult: (result) => set({ deckAnalysisResult: result }),
+      
+      setIsDeckAnalyzing: (isAnalyzing) => set({ isDeckAnalyzing: isAnalyzing }),
+      
+      setDeckAnalysisProgress: (progress) => set({ deckAnalysisProgress: progress }),
       
       setSuggestedCards: (cards) => set({ suggestedCards: cards }),
       

@@ -92,6 +92,7 @@ export interface LLMConfig {
   model: string;
   apiKey: string;
   systemPrompt: string;
+  sendImages: boolean;
 }
 
 export interface CardFeedback {
@@ -130,4 +131,17 @@ export interface AppSettings {
   llmConfig: LLMConfig;
   autoSave: boolean;
   showAdvancedOptions: boolean;
+}
+
+// Deck-level analysis
+export interface DeckAnalysisResult {
+  deckId: number;
+  deckName: string;
+  totalCards: number;
+  analyzedCards: number;
+  averageScore: number;
+  scoreDistribution: { score: number; count: number }[];
+  commonIssues: { issue: string; count: number }[];
+  deckSummary: string;
+  suggestedNewCards: SuggestedCard[];
 }
