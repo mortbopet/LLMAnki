@@ -1,6 +1,5 @@
 import JSZip from 'jszip';
 import { decompress } from 'fzstd';
-import { decode as msgpackDecode } from '@msgpack/msgpack';
 import type { AnkiCollection, AnkiDeck, AnkiModel, AnkiNote, AnkiCard, CardType, AnkiField, AnkiTemplate, ReviewLogEntry } from '../types';
 
 // Get MIME type from filename extension
@@ -37,6 +36,8 @@ interface SqlJsStatic {
 
 interface Database {
   exec(sql: string): { columns: string[]; values: unknown[][] }[];
+  run(sql: string): void;
+  export(): Uint8Array;
   close(): void;
 }
 
@@ -123,13 +124,6 @@ function parseModelsJson(modelsJson: string): Map<number, AnkiModel> {
 function buildDeckTree(decks: Map<number, AnkiDeck>): AnkiDeck[] {
   const deckArray = Array.from(decks.values());
   const rootDecks: AnkiDeck[] = [];
-  
-  // Anki uses either '::' or '\x1f' (Unit Separator) as hierarchy delimiter
-  const getSeparator = (name: string): string => {
-    if (name.includes('\x1f')) return '\x1f';
-    if (name.includes('::')) return '::';
-    return '::';
-  };
   
   // Normalize deck names: convert \x1f to :: for consistent handling
   for (const deck of deckArray) {
@@ -238,7 +232,6 @@ export async function parseApkgFile(file: File, onProgress?: (progress: string) 
   
   // Check for media manifest file
   const mediaFile = zip.file('media');
-  const mediaFolder = zip.folder('media');
   
   if (mediaFile) {
     try {
@@ -598,33 +591,289 @@ export async function parseApkgFile(file: File, onProgress?: (progress: string) 
   };
 }
 
-export function exportCollection(collection: AnkiCollection, excludeCardIds?: Set<number>): Promise<Blob> {
-  // This would rebuild the .apkg file
-  // For now, we'll implement a simplified version
-  return new Promise(async (resolve) => {
-    const zip = new JSZip();
+export async function exportCollection(collection: AnkiCollection, excludeCardIds?: Set<number>): Promise<Blob> {
+  // Create a proper .apkg file with SQLite database
+  const sql = await getSql();
+  const db = new sql.Database();
+  
+  // Create the schema (Anki 2.1.x format)
+  db.exec(`
+    CREATE TABLE col (
+      id INTEGER PRIMARY KEY,
+      crt INTEGER NOT NULL,
+      mod INTEGER NOT NULL,
+      scm INTEGER NOT NULL,
+      ver INTEGER NOT NULL,
+      dty INTEGER NOT NULL,
+      usn INTEGER NOT NULL,
+      ls INTEGER NOT NULL,
+      conf TEXT NOT NULL,
+      models TEXT NOT NULL,
+      decks TEXT NOT NULL,
+      dconf TEXT NOT NULL,
+      tags TEXT NOT NULL
+    );
     
-    // Create a simple media.json
-    const mediaJson: Record<string, string> = {};
-    let mediaIndex = 0;
-    for (const [filename, blob] of collection.media) {
-      mediaJson[mediaIndex.toString()] = filename;
-      zip.file(mediaIndex.toString(), blob);
-      mediaIndex++;
+    CREATE TABLE notes (
+      id INTEGER PRIMARY KEY,
+      guid TEXT NOT NULL,
+      mid INTEGER NOT NULL,
+      mod INTEGER NOT NULL,
+      usn INTEGER NOT NULL,
+      tags TEXT NOT NULL,
+      flds TEXT NOT NULL,
+      sfld TEXT NOT NULL,
+      csum INTEGER NOT NULL,
+      flags INTEGER NOT NULL,
+      data TEXT NOT NULL
+    );
+    
+    CREATE TABLE cards (
+      id INTEGER PRIMARY KEY,
+      nid INTEGER NOT NULL,
+      did INTEGER NOT NULL,
+      ord INTEGER NOT NULL,
+      mod INTEGER NOT NULL,
+      usn INTEGER NOT NULL,
+      type INTEGER NOT NULL,
+      queue INTEGER NOT NULL,
+      due INTEGER NOT NULL,
+      ivl INTEGER NOT NULL,
+      factor INTEGER NOT NULL,
+      reps INTEGER NOT NULL,
+      lapses INTEGER NOT NULL,
+      left INTEGER NOT NULL,
+      odue INTEGER NOT NULL,
+      odid INTEGER NOT NULL,
+      flags INTEGER NOT NULL,
+      data TEXT NOT NULL
+    );
+    
+    CREATE TABLE revlog (
+      id INTEGER PRIMARY KEY,
+      cid INTEGER NOT NULL,
+      usn INTEGER NOT NULL,
+      ease INTEGER NOT NULL,
+      ivl INTEGER NOT NULL,
+      lastIvl INTEGER NOT NULL,
+      factor INTEGER NOT NULL,
+      time INTEGER NOT NULL,
+      type INTEGER NOT NULL
+    );
+    
+    CREATE TABLE graves (
+      usn INTEGER NOT NULL,
+      oid INTEGER NOT NULL,
+      type INTEGER NOT NULL
+    );
+    
+    CREATE INDEX ix_notes_usn ON notes (usn);
+    CREATE INDEX ix_notes_csum ON notes (csum);
+    CREATE INDEX ix_cards_usn ON cards (usn);
+    CREATE INDEX ix_cards_nid ON cards (nid);
+    CREATE INDEX ix_cards_sched ON cards (did, queue, due);
+    CREATE INDEX ix_revlog_usn ON revlog (usn);
+    CREATE INDEX ix_revlog_cid ON revlog (cid);
+  `);
+  
+  const now = Math.floor(Date.now() / 1000);
+  
+  // Build models JSON
+  const modelsObj: Record<string, any> = {};
+  for (const [id, model] of collection.models) {
+    modelsObj[id.toString()] = {
+      id: id,
+      name: model.name,
+      type: model.type,
+      mod: now,
+      usn: -1,
+      sortf: 0,
+      did: null,
+      tmpls: model.templates.map(t => ({
+        name: t.name,
+        ord: t.ordinal,
+        qfmt: t.questionFormat,
+        afmt: t.answerFormat,
+        bqfmt: '',
+        bafmt: '',
+        did: null,
+        bfont: '',
+        bsize: 0
+      })),
+      flds: model.fields.map(f => ({
+        name: f.name,
+        ord: f.ordinal,
+        sticky: f.sticky,
+        rtl: false,
+        font: 'Arial',
+        size: 20,
+        media: []
+      })),
+      css: model.css || '',
+      latexPre: '',
+      latexPost: '',
+      latexsvg: false,
+      req: [[0, 'any', [0]]]
+    };
+  }
+  
+  // Build decks JSON
+  const decksObj: Record<string, any> = {};
+  for (const [id, deck] of collection.decks) {
+    decksObj[id.toString()] = {
+      id: id,
+      name: deck.name,
+      desc: deck.description || '',
+      mod: now,
+      usn: -1,
+      lrnToday: [0, 0],
+      revToday: [0, 0],
+      newToday: [0, 0],
+      timeToday: [0, 0],
+      collapsed: false,
+      browserCollapsed: false,
+      extendNew: 10,
+      extendRev: 50,
+      conf: 1
+    };
+  }
+  
+  // Insert collection row
+  db.exec(`
+    INSERT INTO col VALUES (
+      1,
+      ${Math.floor(Date.now() / 1000) - 86400},
+      ${now},
+      ${now * 1000},
+      11,
+      0,
+      -1,
+      0,
+      '{}',
+      '${JSON.stringify(modelsObj).replace(/'/g, "''")}',
+      '${JSON.stringify(decksObj).replace(/'/g, "''")}',
+      '{"1":{"id":1,"mod":0,"name":"Default","usn":0,"maxTaken":60,"autoplay":true,"timer":0,"replayq":true,"new":{"bury":false,"delays":[1,10],"initialFactor":2500,"ints":[1,4,0],"order":1,"perDay":20},"rev":{"bury":false,"ease4":1.3,"ivlFct":1,"maxIvl":36500,"perDay":200,"hardFactor":1.2},"lapse":{"delays":[10],"leechAction":1,"leechFails":8,"minInt":1,"mult":0}}}',
+      '{}'
+    )
+  `);
+  
+  // Filter cards if excludeCardIds is provided
+  const cardsToExport = excludeCardIds
+    ? Array.from(collection.cards.values()).filter(c => !excludeCardIds.has(c.id))
+    : Array.from(collection.cards.values());
+  
+  // Get the set of note IDs that are still needed
+  const neededNoteIds = new Set(cardsToExport.map(c => c.noteId));
+  
+  // Insert notes
+  for (const [id, note] of collection.notes) {
+    if (!neededNoteIds.has(id)) continue;
+    
+    const flds = note.fields.join('\x1f');
+    const sfld = note.fields[0] || '';
+    const tags = note.tags.join(' ');
+    
+    // Simple checksum of first field
+    let csum = 0;
+    for (let i = 0; i < Math.min(sfld.length, 8); i++) {
+      csum = ((csum << 5) - csum) + sfld.charCodeAt(i);
+      csum |= 0;
     }
-    zip.file('media', JSON.stringify(mediaJson));
+    csum = Math.abs(csum);
     
-    // For a full implementation, we would need to rebuild the SQLite database
-    // This is complex and would require sql.js to create/modify the database
-    // Cards in excludeCardIds should be filtered out when rebuilding
-    // For now, we'll just export the structure
+    db.exec(`
+      INSERT INTO notes VALUES (
+        ${id},
+        '${note.guid.replace(/'/g, "''")}',
+        ${note.modelId},
+        ${note.mod},
+        -1,
+        '${tags.replace(/'/g, "''")}',
+        '${flds.replace(/'/g, "''")}',
+        '${sfld.replace(/'/g, "''")}',
+        ${csum},
+        0,
+        ''
+      )
+    `);
+  }
+  
+  // Insert cards
+  for (const card of cardsToExport) {
+    // Map CardType to Anki type number
+    let ankiType = 0;
+    if (card.queue === 1) ankiType = 1; // learning
+    else if (card.queue === 2 || card.interval > 0) ankiType = 2; // review
     
-    // TODO: When rebuilding the SQLite database, filter out cards/notes using excludeCardIds
-    // const cardsToExport = Array.from(collection.cards.values()).filter(c => !excludeCardIds?.has(c.id));
+    db.exec(`
+      INSERT INTO cards VALUES (
+        ${card.id},
+        ${card.noteId},
+        ${card.deckId},
+        ${card.ordinal},
+        ${now},
+        -1,
+        ${ankiType},
+        ${card.queue},
+        ${card.due},
+        ${card.interval},
+        ${card.factor},
+        ${card.reps},
+        ${card.lapses},
+        0,
+        0,
+        0,
+        0,
+        ''
+      )
+    `);
+  }
+  
+  // Insert revlog entries (only for cards that are being exported)
+  const exportedCardIds = new Set(cardsToExport.map(c => c.id));
+  for (const [cardId, entries] of collection.revlog) {
+    if (!exportedCardIds.has(cardId)) continue;
     
-    const blob = await zip.generateAsync({ type: 'blob' });
-    resolve(blob);
-  });
+    for (const entry of entries) {
+      db.exec(`
+        INSERT INTO revlog VALUES (
+          ${entry.id},
+          ${cardId},
+          -1,
+          ${entry.ease},
+          ${entry.interval},
+          ${entry.lastInterval},
+          ${entry.factor},
+          ${entry.time},
+          ${entry.type}
+        )
+      `);
+    }
+  }
+  
+  // Export database to Uint8Array
+  const dbData = db.export();
+  db.close();
+  
+  // Create zip file
+  const zip = new JSZip();
+  
+  // Add the database as collection.anki2
+  zip.file('collection.anki2', dbData);
+  
+  // Add media files
+  const mediaJson: Record<string, string> = {};
+  let mediaIndex = 0;
+  for (const [filename, blob] of collection.media) {
+    mediaJson[mediaIndex.toString()] = filename;
+    zip.file(mediaIndex.toString(), blob);
+    mediaIndex++;
+  }
+  zip.file('media', JSON.stringify(mediaJson));
+  
+  // Generate the .apkg file
+  const apkgBlob = await zip.generateAsync({ type: 'blob' });
+  return apkgBlob;
 }
 
 export function getCardsInDeck(collection: AnkiCollection, deckId: number, includeSubdecks: boolean = true): AnkiCard[] {

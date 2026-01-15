@@ -1,18 +1,3 @@
-  unmarkDeckSuggestedCardAdded: (deckId: number, cardIndex: number) => void;
-      unmarkDeckSuggestedCardAdded: (deckId, cardIndex) => {
-        const cache = new Map(get().deckAnalysisCache);
-        const existing = cache.get(deckId);
-        if (existing) {
-          const addedIndices = existing.addedSuggestedCardIndices || [];
-          if (addedIndices.includes(cardIndex)) {
-            cache.set(deckId, {
-              ...existing,
-              addedSuggestedCardIndices: addedIndices.filter(i => i !== cardIndex)
-            });
-            set({ deckAnalysisCache: cache });
-          }
-        }
-      },
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { 
@@ -50,6 +35,10 @@ interface AppState {
   
   // Track edited card fields - Map<noteId, fields>
   editedCards: Map<number, { name: string; value: string }[]>;
+  
+  // Track which suggested card indices have been added for each source card
+  // Map<sourceCardId, { suggestedIndex: number, addedCardId: number }[]>
+  addedSuggestedCards: Map<number, { suggestedIndex: number; addedCardId: number }[]>;
   
   // Undo/Redo stacks
   undoStack: UndoableAction[];
@@ -107,11 +96,12 @@ interface AppState {
   setEditingSuggestionIndex: (index: number | null) => void;
   
   // Card operations with undo/redo
-  addCardToDeck: (suggestedCard: SuggestedCard, deckId: number, sourceCardId?: number) => number | null;
+  addCardToDeck: (suggestedCard: SuggestedCard, deckId: number, sourceCardId?: number, suggestedIndex?: number) => number | null;
   deleteCard: (cardId: number) => void;
   markCardForDeletion: (cardId: number) => void;
   unmarkCardForDeletion: (cardId: number) => void;
   isCardMarkedForDeletion: (cardId: number) => boolean;
+  getAddedSuggestedIndices: (sourceCardId: number) => number[];
   updateCardFields: (noteId: number, fields: { name: string; value: string }[]) => void;
   getEditedFields: (noteId: number) => { name: string; value: string }[] | undefined;
   isCardEdited: (noteId: number) => boolean;
@@ -141,6 +131,7 @@ export const useAppStore = create<AppState>()(
       generatedCardIds: new Set(),
       markedForDeletion: new Set(),
       editedCards: new Map(),
+      addedSuggestedCards: new Map(),
       undoStack: [],
       redoStack: [],
       selectedDeckId: null,
@@ -175,6 +166,7 @@ export const useAppStore = create<AppState>()(
         generatedCardIds: new Set(),
         markedForDeletion: new Set(),
         editedCards: new Map(),
+        addedSuggestedCards: new Map(),
         undoStack: [],
         redoStack: [],
         suggestedCards: []
@@ -295,7 +287,7 @@ export const useAppStore = create<AppState>()(
       setEditingSuggestionIndex: (index) => set({ editingSuggestionIndex: index }),
       
       // Add a card to the deck (immediately, with undo support)
-      addCardToDeck: (suggestedCard, deckId, sourceCardId) => {
+      addCardToDeck: (suggestedCard, deckId, sourceCardId, suggestedIndex) => {
         const collection = get().collection;
         const llmConfig = get().llmConfig;
         if (!collection) return null;
@@ -359,9 +351,30 @@ export const useAppStore = create<AppState>()(
         const newNotes = new Map(collection.notes);
         newNotes.set(noteId, note);
         
+        // Copy revlog entries if inheriting metadata
+        const newRevlog = new Map(collection.revlog);
+        if (shouldInheritMetadata && sourceCardId) {
+          const sourceRevlog = collection.revlog.get(sourceCardId);
+          if (sourceRevlog && sourceRevlog.length > 0) {
+            // Create copies of revlog entries with the new card ID
+            const copiedEntries = sourceRevlog.map(entry => ({
+              ...entry,
+              cardId: cardId
+            }));
+            newRevlog.set(cardId, copiedEntries);
+          }
+        }
+        
         // Track as generated
         const newGeneratedIds = new Set(get().generatedCardIds);
         newGeneratedIds.add(cardId);
+        
+        // Track which suggested card was added
+        const newAddedSuggested = new Map(get().addedSuggestedCards);
+        if (sourceCardId !== undefined && suggestedIndex !== undefined) {
+          const existing = newAddedSuggested.get(sourceCardId) || [];
+          newAddedSuggested.set(sourceCardId, [...existing, { suggestedIndex, addedCardId: cardId }]);
+        }
         
         // Create undo action
         const undoAction: UndoableAction = {
@@ -374,8 +387,9 @@ export const useAppStore = create<AppState>()(
         };
         
         set({
-          collection: { ...collection, cards: newCards, notes: newNotes },
+          collection: { ...collection, cards: newCards, notes: newNotes, revlog: newRevlog },
           generatedCardIds: newGeneratedIds,
+          addedSuggestedCards: newAddedSuggested,
           undoStack: [...get().undoStack, undoAction],
           redoStack: [] // Clear redo stack on new action
         });
@@ -461,9 +475,21 @@ export const useAppStore = create<AppState>()(
           const newGeneratedIds = new Set(get().generatedCardIds);
           newGeneratedIds.delete(action.cardId);
           
+          // Remove from addedSuggestedCards tracking
+          const newAddedSuggested = new Map(get().addedSuggestedCards);
+          for (const [sourceId, entries] of newAddedSuggested) {
+            const filtered = entries.filter(e => e.addedCardId !== action.cardId);
+            if (filtered.length === 0) {
+              newAddedSuggested.delete(sourceId);
+            } else if (filtered.length !== entries.length) {
+              newAddedSuggested.set(sourceId, filtered);
+            }
+          }
+          
           const updates: Partial<AppState> = {
             collection: { ...collection, cards: newCards, notes: newNotes },
             generatedCardIds: newGeneratedIds,
+            addedSuggestedCards: newAddedSuggested,
             undoStack: undoStack.slice(0, -1),
             redoStack: [...get().redoStack, action]
           };
@@ -579,6 +605,12 @@ export const useAppStore = create<AppState>()(
       
       // Check if a card is marked for deletion
       isCardMarkedForDeletion: (cardId) => get().markedForDeletion.has(cardId),
+      
+      // Get which suggested card indices have been added for a source card
+      getAddedSuggestedIndices: (sourceCardId) => {
+        const entries = get().addedSuggestedCards.get(sourceCardId) || [];
+        return entries.map(e => e.suggestedIndex);
+      },
       
       // Update card fields (for editing)
       updateCardFields: (noteId, fields) => {

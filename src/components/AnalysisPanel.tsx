@@ -44,6 +44,7 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ result }) => {
     const markCardForDeletion = useAppStore(state => state.markCardForDeletion);
     const unmarkCardForDeletion = useAppStore(state => state.unmarkCardForDeletion);
     const isCardMarkedForDeletion = useAppStore(state => state.isCardMarkedForDeletion);
+    const getAddedSuggestedIndices = useAppStore(state => state.getAddedSuggestedIndices);
     const selectedCard = useAppStore(state => state.selectedCard);
     const selectedDeckId = useAppStore(state => state.selectedDeckId);
     const llmConfig = useAppStore(state => state.llmConfig);
@@ -53,6 +54,9 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ result }) => {
 
     // Get layout preference (default to carousel for backwards compatibility)
     const suggestedCardsLayout = llmConfig.suggestedCardsLayout || 'carousel';
+
+    // Get indices of suggested cards that have already been added
+    const addedIndices = selectedCard ? getAddedSuggestedIndices(selectedCard.id) : [];
 
     const handleEditCard = (index: number) => {
         setCarouselIndex(index); // Remember where we were
@@ -64,10 +68,10 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ result }) => {
         setEditingSuggestionIndex(null);
     };
 
-    const handleAddCard = (card: SuggestedCard) => {
+    const handleAddCard = (card: SuggestedCard, index: number) => {
         if (selectedDeckId !== null) {
-            // Pass the selected card ID for potential metadata inheritance
-            addCardToDeck(card, selectedDeckId, selectedCard?.id);
+            // Pass the selected card ID for potential metadata inheritance, and the suggested card index
+            addCardToDeck(card, selectedDeckId, selectedCard?.id, index);
         }
     };
 
@@ -195,8 +199,8 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ result }) => {
                     <button
                         onClick={handleToggleDeleteMark}
                         className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${isCurrentCardMarked
-                                ? 'bg-gray-600 hover:bg-gray-500'
-                                : 'bg-red-600 hover:bg-red-700'
+                            ? 'bg-gray-600 hover:bg-gray-500'
+                            : 'bg-red-600 hover:bg-red-700'
                             }`}
                     >
                         {isCurrentCardMarked ? (
@@ -232,20 +236,22 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ result }) => {
                     ) : suggestedCardsLayout === 'list' ? (
                         <SuggestedCardsList
                             cards={displayCards}
-                            onAddCard={(card) => handleAddCard(card)}
+                            onAddCard={(card, index) => handleAddCard(card, index)}
                             onEditCard={(index) => handleEditCard(index)}
                             onRemoveCard={(index) => removeSuggestedCard(index)}
                             titlePrefix="Suggested Card"
+                            addedIndices={addedIndices}
                         />
                     ) : (
                         <CardCarousel
                             cards={displayCards}
-                            onAddCard={(card) => handleAddCard(card)}
+                            onAddCard={(card, index) => handleAddCard(card, index)}
                             onEditCard={(index) => handleEditCard(index)}
                             onRemoveCard={(index) => removeSuggestedCard(index)}
                             titlePrefix="Suggested Card"
                             initialSlide={carouselIndex}
                             onSlideChange={setCarouselIndex}
+                            addedIndices={addedIndices}
                         />
                     )}
                 </div>

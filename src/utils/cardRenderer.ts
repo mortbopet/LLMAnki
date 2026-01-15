@@ -128,7 +128,7 @@ export async function processMediaReferences(
   
   // Also handle [sound:filename] references
   const soundRegex = /\[sound:([^\]]+)\]/gi;
-  result = result.replace(soundRegex, (match, filename) => {
+  result = result.replace(soundRegex, (_match, filename) => {
     const blob = media.get(filename);
     if (blob) {
       return `<span class="sound-reference" style="display:inline-flex;align-items:center;gap:4px;padding:4px 8px;background:#374151;border-radius:4px;color:#9ca3af;font-size:12px;">🔊 ${filename}</span>`;
