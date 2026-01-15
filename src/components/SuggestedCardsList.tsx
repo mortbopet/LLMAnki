@@ -1,5 +1,5 @@
 import React from 'react';
-import { Plus, Edit3, Trash2, Check } from 'lucide-react';
+import { Plus, Edit3, Trash2, Check, X } from 'lucide-react';
 import { CardViewer } from './CardViewer';
 import type { SuggestedCard } from '../types';
 
@@ -8,6 +8,7 @@ interface SuggestedCardsListProps {
     onAddCard?: (card: SuggestedCard, index: number) => void;
     onEditCard?: (index: number) => void;
     onRemoveCard?: (index: number) => void;
+    onRemoveAddedCard?: (index: number) => void;
     showActions?: boolean;
     titlePrefix?: string;
     addedIndices?: number[];
@@ -18,6 +19,7 @@ export const SuggestedCardsList: React.FC<SuggestedCardsListProps> = ({
     onAddCard,
     onEditCard,
     onRemoveCard,
+    onRemoveAddedCard,
     showActions = true,
     titlePrefix = 'Card',
     addedIndices = []
@@ -31,14 +33,26 @@ export const SuggestedCardsList: React.FC<SuggestedCardsListProps> = ({
                 return (
                     <div key={index} className={`relative group ${isAdded ? 'opacity-50' : ''}`}>
                         <div className={`rounded-lg shadow-lg shadow-black/30 transition-shadow overflow-hidden ${isAdded
-                                ? 'ring-1 ring-gray-500/30'
-                                : 'ring-1 ring-green-500/30 hover:shadow-xl hover:shadow-black/40'
+                            ? 'ring-1 ring-gray-500/30'
+                            : 'ring-1 ring-green-500/30 hover:shadow-xl hover:shadow-black/40'
                             }`}>
                             {/* Added Badge */}
                             {isAdded && (
-                                <div className="px-4 py-2 bg-gray-700/80 border-b border-gray-600 flex items-center gap-2">
-                                    <Check className="w-4 h-4 text-green-400" />
-                                    <span className="text-sm text-green-400 font-medium">Added to deck</span>
+                                <div className="px-4 py-2 bg-gray-700/80 border-b border-gray-600 flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                        <Check className="w-4 h-4 text-green-400" />
+                                        <span className="text-sm text-green-400 font-medium">Added to deck</span>
+                                    </div>
+                                    {onRemoveAddedCard && (
+                                        <button
+                                            onClick={() => onRemoveAddedCard(index)}
+                                            className="flex items-center gap-1 px-2 py-1 text-xs text-red-400 hover:text-red-300 hover:bg-red-900/30 rounded transition-colors"
+                                            title="Remove from deck"
+                                        >
+                                            <X className="w-3 h-3" />
+                                            Remove
+                                        </button>
+                                    )}
                                 </div>
                             )}
                             {/* Explanation at top of card */}

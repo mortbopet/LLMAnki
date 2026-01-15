@@ -2,8 +2,8 @@
  * Analysis Cache Utility
  * 
  * Provides persistent caching of card analysis results using localStorage.
- * Uses content hashing to ensure cached results are only used when the card
- * content matches exactly.
+ * Uses content hashing (deck name + fields) to ensure cached results can be 
+ * shared across different deck files when the content is identical.
  */
 
 import type { LLMAnalysisResult, AnkiCard, AnkiNote } from '../types';
@@ -12,8 +12,17 @@ import type { LLMAnalysisResult, AnkiCard, AnkiNote } from '../types';
 const CACHE_PREFIX = 'llmanki-analysis-cache-';
 const CACHE_INDEX_KEY = 'llmanki-analysis-cache-index';
 const STATE_PREFIX = 'llmanki-state-';
+const GLOBAL_CACHE_KEY = 'llmanki-global-analysis-cache';
 
-// Interface for a cached card analysis
+// Interface for a cached card analysis (global cache entry)
+export interface GlobalCachedAnalysis {
+  cacheKey: string; // Hash of deckName + fields
+  deckName: string; // For debugging/display
+  result: LLMAnalysisResult;
+  cachedAt: number; // timestamp
+}
+
+// Interface for a cached card analysis (legacy per-deck cache)
 export interface CachedCardAnalysis {
   cardId: number;
   contentHash: string;
@@ -66,6 +75,64 @@ export function generateContentHash(fields: { name: string; value: string }[]): 
   
   // Convert to hex string
   return (hash >>> 0).toString(16);
+}
+
+/**
+ * Generate a cache key from deck name and card fields.
+ * This allows matching cached analyses across different deck files.
+ */
+export function generateCacheKey(deckName: string, fields: { name: string; value: string }[]): string {
+  // Combine deck name (full path including parents) with field content
+  const content = deckName + '||' + fields
+    .map(f => `${f.name}:${f.value}`)
+    .join('|');
+  
+  // djb2 hash algorithm
+  let hash = 5381;
+  for (let i = 0; i < content.length; i++) {
+    hash = ((hash << 5) + hash) ^ content.charCodeAt(i);
+  }
+  
+  // Convert to hex string
+  return (hash >>> 0).toString(16);
+}
+
+/**
+ * Get the global analysis cache
+ */
+export function getGlobalCache(): Map<string, GlobalCachedAnalysis> {
+  const cache = new Map<string, GlobalCachedAnalysis>();
+  
+  try {
+    const dataJson = localStorage.getItem(GLOBAL_CACHE_KEY);
+    
+    if (dataJson) {
+      const data: GlobalCachedAnalysis[] = JSON.parse(dataJson);
+      for (const entry of data) {
+        cache.set(entry.cacheKey, entry);
+      }
+    }
+  } catch (e) {
+    console.error('Failed to load global cache:', e);
+  }
+  
+  return cache;
+}
+
+/**
+ * Save the global analysis cache
+ */
+function saveGlobalCache(cache: Map<string, GlobalCachedAnalysis>): void {
+  try {
+    const data = Array.from(cache.values());
+    const dataJson = JSON.stringify(data);
+    localStorage.setItem(GLOBAL_CACHE_KEY, dataJson);
+  } catch (e) {
+    console.error('Failed to save global cache:', e);
+    if (e instanceof Error && e.name === 'QuotaExceededError') {
+      console.warn('localStorage quota exceeded, global cache not saved');
+    }
+  }
 }
 
 /**
@@ -159,13 +226,26 @@ export function saveDeckCache(
 }
 
 /**
- * Get a cached analysis for a specific card, verifying the content hash matches
+ * Get a cached analysis for a specific card using the global cache.
+ * Uses deck name + fields hash for matching.
  */
 export function getCachedAnalysis(
   deckFileName: string,
   cardId: number,
-  fields: { name: string; value: string }[]
+  fields: { name: string; value: string }[],
+  deckName?: string
 ): LLMAnalysisResult | null {
+  // Try global cache first if we have deckName
+  if (deckName) {
+    const globalCache = getGlobalCache();
+    const cacheKey = generateCacheKey(deckName, fields);
+    const globalEntry = globalCache.get(cacheKey);
+    if (globalEntry) {
+      return globalEntry.result;
+    }
+  }
+  
+  // Fall back to legacy per-deck cache
   const cache = getDeckCache(deckFileName);
   const entry = cache.get(cardId);
   
@@ -184,14 +264,29 @@ export function getCachedAnalysis(
 }
 
 /**
- * Cache an analysis result for a card
+ * Cache an analysis result for a card in both global and per-deck caches.
  */
 export function cacheAnalysisResult(
   deckFileName: string,
   cardId: number,
   fields: { name: string; value: string }[],
-  result: LLMAnalysisResult
+  result: LLMAnalysisResult,
+  deckName?: string
 ): void {
+  // Save to global cache if we have deckName
+  if (deckName) {
+    const globalCache = getGlobalCache();
+    const cacheKey = generateCacheKey(deckName, fields);
+    globalCache.set(cacheKey, {
+      cacheKey,
+      deckName,
+      result,
+      cachedAt: Date.now()
+    });
+    saveGlobalCache(globalCache);
+  }
+  
+  // Also save to legacy per-deck cache for backward compatibility
   const cache = getDeckCache(deckFileName);
   
   cache.set(cardId, {
@@ -222,7 +317,7 @@ export function clearDeckCache(deckFileName: string): void {
 }
 
 /**
- * Clear all analysis caches
+ * Clear all analysis caches (both global and per-deck)
  */
 export function clearAllCaches(): void {
   try {
@@ -236,13 +331,16 @@ export function clearAllCaches(): void {
     
     // Clear the index
     localStorage.removeItem(CACHE_INDEX_KEY);
+    
+    // Clear global cache
+    localStorage.removeItem(GLOBAL_CACHE_KEY);
   } catch (e) {
     console.error('Failed to clear all caches:', e);
   }
 }
 
 /**
- * Get total cache size in bytes
+ * Get total cache size in bytes (includes global cache)
  */
 export function getTotalCacheSize(): number {
   const index = getCacheIndex();
@@ -252,7 +350,47 @@ export function getTotalCacheSize(): number {
     total += info.sizeBytes;
   }
   
+  // Add global cache size
+  try {
+    const globalData = localStorage.getItem(GLOBAL_CACHE_KEY);
+    if (globalData) {
+      total += new Blob([globalData]).size;
+    }
+  } catch (e) {
+    // Ignore errors
+  }
+  
   return total;
+}
+
+/**
+ * Get global cache statistics
+ */
+export function getGlobalCacheStats(): { entryCount: number; sizeBytes: number; deckNames: string[] } {
+  const globalCache = getGlobalCache();
+  const deckNames = new Set<string>();
+  
+  for (const entry of globalCache.values()) {
+    if (entry.deckName) {
+      deckNames.add(entry.deckName);
+    }
+  }
+  
+  let sizeBytes = 0;
+  try {
+    const globalData = localStorage.getItem(GLOBAL_CACHE_KEY);
+    if (globalData) {
+      sizeBytes = new Blob([globalData]).size;
+    }
+  } catch (e) {
+    // Ignore errors
+  }
+  
+  return {
+    entryCount: globalCache.size,
+    sizeBytes,
+    deckNames: Array.from(deckNames).sort()
+  };
 }
 
 /**
@@ -277,11 +415,27 @@ export function bulkCacheAnalysisResults(
     cardId: number;
     fields: { name: string; value: string }[];
     result: LLMAnalysisResult;
+    deckName?: string;
   }>
 ): void {
   const cache = getDeckCache(deckFileName);
+  const globalCache = getGlobalCache();
+  let hasGlobalUpdates = false;
   
-  for (const { cardId, fields, result } of results) {
+  for (const { cardId, fields, result, deckName } of results) {
+    // Add to global cache if deckName is provided
+    if (deckName) {
+      const cacheKey = generateCacheKey(deckName, fields);
+      globalCache.set(cacheKey, {
+        cacheKey,
+        deckName,
+        result,
+        cachedAt: Date.now()
+      });
+      hasGlobalUpdates = true;
+    }
+    
+    // Add to legacy per-deck cache
     cache.set(cardId, {
       cardId,
       contentHash: generateContentHash(fields),
@@ -291,20 +445,35 @@ export function bulkCacheAnalysisResults(
   }
   
   saveDeckCache(deckFileName, cache);
+  if (hasGlobalUpdates) {
+    saveGlobalCache(globalCache);
+  }
 }
 
 /**
- * Load cached results into a Map, filtering by content hash
+ * Load cached results into a Map, checking global cache first then falling back to per-deck cache
  */
 export function loadValidCachedResults(
   deckFileName: string,
-  cards: Array<{ id: number; fields: { name: string; value: string }[] }>
+  cards: Array<{ id: number; fields: { name: string; value: string }[]; deckName?: string }>
 ): Map<number, LLMAnalysisResult> {
   const validResults = new Map<number, LLMAnalysisResult>();
-  const cache = getDeckCache(deckFileName);
+  const globalCache = getGlobalCache();
+  const legacyCache = getDeckCache(deckFileName);
   
   for (const card of cards) {
-    const entry = cache.get(card.id);
+    // Try global cache first if we have deckName
+    if (card.deckName) {
+      const cacheKey = generateCacheKey(card.deckName, card.fields);
+      const globalEntry = globalCache.get(cacheKey);
+      if (globalEntry) {
+        validResults.set(card.id, globalEntry.result);
+        continue;
+      }
+    }
+    
+    // Fall back to legacy per-deck cache
+    const entry = legacyCache.get(card.id);
     if (entry) {
       const currentHash = generateContentHash(card.fields);
       if (entry.contentHash === currentHash) {

@@ -975,7 +975,7 @@ export async function analyzeCardsInDeck(
   collection: AnkiCollection,
   cards: AnkiCard[],
   config: LLMConfig,
-  onProgress?: (current: number, total: number, cardId?: number, result?: LLMAnalysisResult, fields?: { name: string; value: string }[]) => void,
+  onProgress?: (current: number, total: number, cardId?: number, result?: LLMAnalysisResult, fields?: { name: string; value: string }[], deckName?: string) => void,
   isCancelled?: () => boolean,
   existingCache?: Map<number, LLMAnalysisResult>
 ): Promise<{ results: { cardId: number; result: LLMAnalysisResult }[]; error?: string }> {
@@ -1030,7 +1030,7 @@ export async function analyzeCardsInDeck(
           
           const renderedCard = await renderCard(collection, card);
           const result = await analyzeCard(renderedCard, config);
-          return { cardId: card.id, result, fields: renderedCard.fields };
+          return { cardId: card.id, result, fields: renderedCard.fields, deckName: renderedCard.deckName };
         });
         
         const batchResults = await Promise.all(batchPromises);
@@ -1039,7 +1039,7 @@ export async function analyzeCardsInDeck(
           if (result) {
             results.push({ cardId: result.cardId, result: result.result });
             completed++;
-            onProgress?.(completed, cardsToAnalyze.length, result.cardId, result.result, result.fields);
+            onProgress?.(completed, cardsToAnalyze.length, result.cardId, result.result, result.fields, result.deckName);
           }
         }
       } catch (e) {
@@ -1067,7 +1067,7 @@ export async function analyzeCardsInDeck(
         const renderedCard = await renderCard(collection, card);
         const result = await analyzeCard(renderedCard, config);
         results.push({ cardId: card.id, result });
-        onProgress?.(currentProgress, cardsToAnalyze.length, card.id, result, renderedCard.fields);
+        onProgress?.(currentProgress, cardsToAnalyze.length, card.id, result, renderedCard.fields, renderedCard.deckName);
       } catch (e) {
         // Stop on any error
         const errorMessage = e instanceof Error ? e.message : 'Analysis failed';

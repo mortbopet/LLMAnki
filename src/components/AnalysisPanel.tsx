@@ -45,6 +45,8 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ result }) => {
     const unmarkCardForDeletion = useAppStore(state => state.unmarkCardForDeletion);
     const isCardMarkedForDeletion = useAppStore(state => state.isCardMarkedForDeletion);
     const getAddedSuggestedIndices = useAppStore(state => state.getAddedSuggestedIndices);
+    const getAddedCardId = useAppStore(state => state.getAddedCardId);
+    const deleteCard = useAppStore(state => state.deleteCard);
     const selectedCard = useAppStore(state => state.selectedCard);
     const selectedDeckId = useAppStore(state => state.selectedDeckId);
     const llmConfig = useAppStore(state => state.llmConfig);
@@ -72,6 +74,15 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ result }) => {
         if (selectedDeckId !== null) {
             // Pass the selected card ID for potential metadata inheritance, and the suggested card index
             addCardToDeck(card, selectedDeckId, selectedCard?.id, index);
+        }
+    };
+
+    const handleRemoveAddedCard = (index: number) => {
+        if (selectedCard) {
+            const addedCardId = getAddedCardId(selectedCard.id, index);
+            if (addedCardId !== null) {
+                deleteCard(addedCardId);
+            }
         }
     };
 
@@ -239,6 +250,7 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ result }) => {
                             onAddCard={(card, index) => handleAddCard(card, index)}
                             onEditCard={(index) => handleEditCard(index)}
                             onRemoveCard={(index) => removeSuggestedCard(index)}
+                            onRemoveAddedCard={handleRemoveAddedCard}
                             titlePrefix="Suggested Card"
                             addedIndices={addedIndices}
                         />
@@ -248,6 +260,7 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ result }) => {
                             onAddCard={(card, index) => handleAddCard(card, index)}
                             onEditCard={(index) => handleEditCard(index)}
                             onRemoveCard={(index) => removeSuggestedCard(index)}
+                            onRemoveAddedCard={handleRemoveAddedCard}
                             titlePrefix="Suggested Card"
                             initialSlide={carouselIndex}
                             onSlideChange={setCarouselIndex}

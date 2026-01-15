@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Settings, X, RotateCcw, Key, Server, MessageSquare, Info, ExternalLink, Image, Layers, Zap, RefreshCw, Loader2, Clock, LayoutGrid, Cpu, SlidersHorizontal, Monitor, History, Sun, Moon, Database, Trash2 } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 import { LLM_PROVIDERS, DEFAULT_SYSTEM_PROMPT, PROVIDER_INFO, SYSTEM_PROMPT_VERSION, fetchProviderModels, clearModelCache, type ModelInfo } from '../utils/llmService';
-import { getCacheIndex, clearDeckCache, clearAllCaches, formatBytes, type DeckCacheInfo } from '../utils/analysisCache';
+import { getCacheIndex, clearDeckCache, clearAllCaches, formatBytes, getGlobalCacheStats, type DeckCacheInfo } from '../utils/analysisCache';
 import type { LLMConfig } from '../types';
 
 type SettingsTab = 'provider' | 'analysis' | 'display' | 'caching';
@@ -23,6 +23,7 @@ export const SettingsPanel: React.FC = () => {
     const [modelsError, setModelsError] = useState<string | null>(null);
     const [activeTab, setActiveTab] = useState<SettingsTab>('provider');
     const [cacheInfo, setCacheInfo] = useState<Record<string, DeckCacheInfo>>({});
+    const [globalCacheStats, setGlobalCacheStats] = useState<{ entryCount: number; sizeBytes: number; deckNames: string[] }>({ entryCount: 0, sizeBytes: 0, deckNames: [] });
     const [cacheRefreshKey, setCacheRefreshKey] = useState(0);
 
     const selectedProvider = LLM_PROVIDERS.find(p => p.id === llmConfig.providerId);
@@ -36,6 +37,7 @@ export const SettingsPanel: React.FC = () => {
         if (activeTab === 'caching') {
             const index = getCacheIndex();
             setCacheInfo(index.decks);
+            setGlobalCacheStats(getGlobalCacheStats());
         }
     }, [activeTab, cacheRefreshKey]);
 
@@ -124,8 +126,8 @@ export const SettingsPanel: React.FC = () => {
                     <button
                         onClick={() => setActiveTab('provider')}
                         className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors ${activeTab === 'provider'
-                                ? 'text-blue-400 border-b-2 border-blue-400 bg-gray-800/50'
-                                : 'text-gray-400 hover:text-gray-300 hover:bg-gray-700/50'
+                            ? 'text-blue-400 border-b-2 border-blue-400 bg-gray-800/50'
+                            : 'text-gray-400 hover:text-gray-300 hover:bg-gray-700/50'
                             }`}
                     >
                         <Cpu className="w-4 h-4" />
@@ -134,8 +136,8 @@ export const SettingsPanel: React.FC = () => {
                     <button
                         onClick={() => setActiveTab('analysis')}
                         className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors ${activeTab === 'analysis'
-                                ? 'text-blue-400 border-b-2 border-blue-400 bg-gray-800/50'
-                                : 'text-gray-400 hover:text-gray-300 hover:bg-gray-700/50'
+                            ? 'text-blue-400 border-b-2 border-blue-400 bg-gray-800/50'
+                            : 'text-gray-400 hover:text-gray-300 hover:bg-gray-700/50'
                             }`}
                     >
                         <SlidersHorizontal className="w-4 h-4" />
@@ -144,8 +146,8 @@ export const SettingsPanel: React.FC = () => {
                     <button
                         onClick={() => setActiveTab('display')}
                         className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors ${activeTab === 'display'
-                                ? 'text-blue-400 border-b-2 border-blue-400 bg-gray-800/50'
-                                : 'text-gray-400 hover:text-gray-300 hover:bg-gray-700/50'
+                            ? 'text-blue-400 border-b-2 border-blue-400 bg-gray-800/50'
+                            : 'text-gray-400 hover:text-gray-300 hover:bg-gray-700/50'
                             }`}
                     >
                         <Monitor className="w-4 h-4" />
@@ -154,8 +156,8 @@ export const SettingsPanel: React.FC = () => {
                     <button
                         onClick={() => setActiveTab('caching')}
                         className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors ${activeTab === 'caching'
-                                ? 'text-blue-400 border-b-2 border-blue-400 bg-gray-800/50'
-                                : 'text-gray-400 hover:text-gray-300 hover:bg-gray-700/50'
+                            ? 'text-blue-400 border-b-2 border-blue-400 bg-gray-800/50'
+                            : 'text-gray-400 hover:text-gray-300 hover:bg-gray-700/50'
                             }`}
                     >
                         <Database className="w-4 h-4" />
@@ -480,44 +482,39 @@ export const SettingsPanel: React.FC = () => {
                                     Analysis Cache
                                 </h3>
                                 <p className="text-sm text-gray-400 mb-4">
-                                    Analysis results are cached in your browser so you can reload decks and continue where you left off. Cached results are only used when the card content matches exactly (verified by hash).
+                                    Analysis results are cached in your browser using a hash of the deck name and card content. This means cached results can be reused across different deck files when the content matches exactly.
                                 </p>
 
-                                {/* Total cache size */}
-                                {(() => {
-                                    const deckEntries = Object.values(cacheInfo);
-                                    const totalSize = deckEntries.reduce((sum, d) => sum + d.sizeBytes, 0);
-                                    const totalCards = deckEntries.reduce((sum, d) => sum + d.cardCount, 0);
-
-                                    return (
-                                        <div className="bg-gray-700 rounded-lg p-4 mb-4">
-                                            <div className="flex items-center justify-between">
-                                                <div>
-                                                    <div className="text-sm font-medium text-gray-300">Total Cache Size</div>
-                                                    <div className="text-2xl font-bold text-blue-400">{formatBytes(totalSize)}</div>
-                                                    <div className="text-xs text-gray-400">{totalCards} cards cached across {deckEntries.length} deck(s)</div>
-                                                </div>
-                                                {deckEntries.length > 0 && (
-                                                    <button
-                                                        onClick={() => {
-                                                            if (confirm('Are you sure you want to clear all cached analyses? This cannot be undone.')) {
-                                                                clearAllCaches();
-                                                                setCacheRefreshKey(k => k + 1);
-                                                            }
-                                                        }}
-                                                        className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg text-sm transition-colors"
-                                                    >
-                                                        <Trash2 className="w-4 h-4" />
-                                                        Clear All
-                                                    </button>
-                                                )}
+                                {/* Global cache stats */}
+                                <div className="bg-gray-700 rounded-lg p-4 mb-4">
+                                    <div className="flex items-center justify-between">
+                                        <div>
+                                            <div className="text-sm font-medium text-gray-300">Cache Size</div>
+                                            <div className="text-2xl font-bold text-blue-400">{formatBytes(globalCacheStats.sizeBytes)}</div>
+                                            <div className="text-xs text-gray-400">
+                                                {globalCacheStats.entryCount} cached analyses
+                                                {globalCacheStats.deckNames.length > 0 && ` across ${globalCacheStats.deckNames.length} deck(s)`}
                                             </div>
                                         </div>
-                                    );
-                                })()}
+                                        {globalCacheStats.entryCount > 0 && (
+                                            <button
+                                                onClick={() => {
+                                                    if (confirm('Are you sure you want to clear all cached analyses? This cannot be undone.')) {
+                                                        clearAllCaches();
+                                                        setCacheRefreshKey(k => k + 1);
+                                                    }
+                                                }}
+                                                className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg text-sm transition-colors"
+                                            >
+                                                <Trash2 className="w-4 h-4" />
+                                                Clear All
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
 
-                                {/* Cached decks list */}
-                                {Object.keys(cacheInfo).length === 0 ? (
+                                {/* Deck names in cache */}
+                                {globalCacheStats.entryCount === 0 ? (
                                     <div className="text-center py-8 text-gray-500">
                                         <Database className="w-12 h-12 mx-auto mb-3 opacity-50" />
                                         <p>No cached analyses yet</p>
@@ -525,40 +522,23 @@ export const SettingsPanel: React.FC = () => {
                                     </div>
                                 ) : (
                                     <div className="space-y-2">
-                                        <div className="text-sm font-medium text-gray-400 mb-2">Cached Decks</div>
-                                        {Object.values(cacheInfo)
-                                            .sort((a, b) => b.lastUpdated - a.lastUpdated)
-                                            .map((deck) => (
-                                                <div
-                                                    key={deck.deckFileName}
-                                                    className="bg-gray-700 rounded-lg p-3 flex items-center justify-between"
-                                                >
-                                                    <div className="min-w-0 flex-1">
-                                                        <div className="text-sm font-medium text-gray-200 truncate" title={deck.deckFileName}>
-                                                            {deck.deckFileName}
-                                                        </div>
-                                                        <div className="flex items-center gap-3 text-xs text-gray-400 mt-1">
-                                                            <span>{deck.cardCount} cards</span>
-                                                            <span>•</span>
-                                                            <span>{formatBytes(deck.sizeBytes)}</span>
-                                                            <span>•</span>
-                                                            <span>Updated {new Date(deck.lastUpdated).toLocaleDateString()}</span>
-                                                        </div>
-                                                    </div>
-                                                    <button
-                                                        onClick={() => {
-                                                            if (confirm(`Clear cached analyses for "${deck.deckFileName}"?`)) {
-                                                                clearDeckCache(deck.deckFileName);
-                                                                setCacheRefreshKey(k => k + 1);
-                                                            }
-                                                        }}
-                                                        className="flex-shrink-0 p-2 text-gray-400 hover:text-red-400 hover:bg-gray-600 rounded-lg transition-colors"
-                                                        title="Clear cache for this deck"
+                                        <div className="text-sm font-medium text-gray-400 mb-2">Decks with Cached Analyses</div>
+                                        <div className="bg-gray-700 rounded-lg p-3">
+                                            <div className="flex flex-wrap gap-2">
+                                                {globalCacheStats.deckNames.map((deckName) => (
+                                                    <span
+                                                        key={deckName}
+                                                        className="px-2 py-1 bg-gray-600 rounded text-xs text-gray-300"
+                                                        title={deckName}
                                                     >
-                                                        <Trash2 className="w-4 h-4" />
-                                                    </button>
-                                                </div>
-                                            ))}
+                                                        {deckName.length > 40 ? deckName.slice(0, 40) + '...' : deckName}
+                                                    </span>
+                                                ))}
+                                            </div>
+                                        </div>
+                                        <p className="text-xs text-gray-500 mt-2">
+                                            Cache entries are matched by deck name and card content hash, allowing analyses to be shared across different deck files.
+                                        </p>
                                     </div>
                                 )}
                             </div>

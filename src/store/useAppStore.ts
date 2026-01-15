@@ -80,9 +80,9 @@ interface AppState {
   setAnalysisResult: (result: LLMAnalysisResult | null) => void;
   setIsAnalyzing: (isAnalyzing: boolean) => void;
   setAnalysisError: (error: string | null) => void;
-  cacheAnalysis: (cardId: number, result: LLMAnalysisResult, fields?: { name: string; value: string }[]) => void;
+  cacheAnalysis: (cardId: number, result: LLMAnalysisResult, fields?: { name: string; value: string }[], deckName?: string) => void;
   getCachedAnalysis: (cardId: number) => LLMAnalysisResult | undefined;
-  loadCachedAnalysesForDeck: (cards: Array<{ id: number; fields: { name: string; value: string }[] }>) => number;
+  loadCachedAnalysesForDeck: (cards: Array<{ id: number; fields: { name: string; value: string }[]; deckName?: string }>) => number;
   cacheDeckAnalysis: (deckId: number, result: DeckAnalysisResult) => void;
   markDeckSuggestedCardAdded: (deckId: number, cardIndex: number) => void;
   setAnalyzingDeckId: (deckId: number | null) => void;
@@ -102,6 +102,7 @@ interface AppState {
   unmarkCardForDeletion: (cardId: number) => void;
   isCardMarkedForDeletion: (cardId: number) => boolean;
   getAddedSuggestedIndices: (sourceCardId: number) => number[];
+  getAddedCardId: (sourceCardId: number, suggestedIndex: number) => number | null;
   updateCardFields: (noteId: number, fields: { name: string; value: string }[]) => void;
   getEditedFields: (noteId: number) => { name: string; value: string }[] | undefined;
   isCardEdited: (noteId: number) => boolean;
@@ -207,7 +208,7 @@ export const useAppStore = create<AppState>()(
       
       setAnalysisError: (error) => set({ analysisError: error }),
       
-      cacheAnalysis: (cardId, result, fields) => {
+      cacheAnalysis: (cardId, result, fields, deckName) => {
         const cache = new Map(get().analysisCache);
         cache.set(cardId, result);
         set({ analysisCache: cache });
@@ -215,7 +216,7 @@ export const useAppStore = create<AppState>()(
         // Also persist to localStorage if we have the deck file name and fields
         const fileName = get().fileName;
         if (fileName && fields) {
-          cacheAnalysisResult(fileName, cardId, fields, result);
+          cacheAnalysisResult(fileName, cardId, fields, result, deckName);
         }
       },
       
@@ -356,9 +357,12 @@ export const useAppStore = create<AppState>()(
         if (shouldInheritMetadata && sourceCardId) {
           const sourceRevlog = collection.revlog.get(sourceCardId);
           if (sourceRevlog && sourceRevlog.length > 0) {
-            // Create copies of revlog entries with the new card ID
-            const copiedEntries = sourceRevlog.map(entry => ({
+            // Create copies of revlog entries with new unique IDs and the new card ID
+            // Generate new unique IDs based on current timestamp + offset
+            const baseTime = Date.now();
+            const copiedEntries = sourceRevlog.map((entry, idx) => ({
               ...entry,
+              id: baseTime + idx, // New unique ID
               cardId: cardId
             }));
             newRevlog.set(cardId, copiedEntries);
@@ -429,6 +433,21 @@ export const useAppStore = create<AppState>()(
           }
         }
         
+        // Remove from generatedCardIds if present
+        const newGeneratedIds = new Set(get().generatedCardIds);
+        newGeneratedIds.delete(cardId);
+        
+        // Remove from addedSuggestedCards tracking
+        const newAddedSuggested = new Map(get().addedSuggestedCards);
+        for (const [sourceId, entries] of newAddedSuggested) {
+          const filtered = entries.filter(e => e.addedCardId !== cardId);
+          if (filtered.length === 0) {
+            newAddedSuggested.delete(sourceId);
+          } else if (filtered.length !== entries.length) {
+            newAddedSuggested.set(sourceId, filtered);
+          }
+        }
+        
         // Create undo action
         const undoAction: UndoableAction = {
           type: 'delete-card',
@@ -442,6 +461,8 @@ export const useAppStore = create<AppState>()(
         // Clear selection if deleted card was selected
         const updates: Partial<AppState> = {
           collection: { ...collection, cards: newCards, notes: newNotes },
+          generatedCardIds: newGeneratedIds,
+          addedSuggestedCards: newAddedSuggested,
           undoStack: [...get().undoStack, undoAction],
           redoStack: []
         };
@@ -610,6 +631,13 @@ export const useAppStore = create<AppState>()(
       getAddedSuggestedIndices: (sourceCardId) => {
         const entries = get().addedSuggestedCards.get(sourceCardId) || [];
         return entries.map(e => e.suggestedIndex);
+      },
+      
+      // Get the added card ID for a specific suggested card
+      getAddedCardId: (sourceCardId, suggestedIndex) => {
+        const entries = get().addedSuggestedCards.get(sourceCardId) || [];
+        const entry = entries.find(e => e.suggestedIndex === suggestedIndex);
+        return entry?.addedCardId ?? null;
       },
       
       // Update card fields (for editing)

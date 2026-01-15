@@ -111,7 +111,7 @@ export const LandingPage: React.FC = () => {
                             <Loader2 className="w-16 h-16 text-blue-400 animate-spin" />
                             <div className="space-y-2">
                                 <p className="text-lg text-gray-200">{loadingProgress || 'Loading...'}</p>
-                                <p className="text-sm text-gray-400">Please wait while we process your deck</p>
+                                <p className="text-sm text-gray-400">Processing deck...</p>
                             </div>
                         </div>
                     ) : (

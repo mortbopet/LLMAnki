@@ -29,7 +29,7 @@ import { LandingPage } from './components/LandingPage';
 import { analyzeCard, analyzeCardsInDeck, generateDeckInsights, getApiKey, DEFAULT_SYSTEM_PROMPT, SYSTEM_PROMPT_VERSION } from './utils/llmService';
 import { exportCollection, getCardsInDeck } from './utils/ankiParser';
 import { renderCard } from './utils/cardRenderer';
-import { getCacheIndex } from './utils/analysisCache';
+
 import type { DeckAnalysisResult } from './types';
 
 function App() {
@@ -129,23 +129,16 @@ function App() {
     useEffect(() => {
         if (!collection || !fileName || cacheLoadedForFile === fileName) return;
 
-        // Check if we have cached analyses for this file
-        const cacheIndex = getCacheIndex();
-        if (!cacheIndex.decks[fileName]) {
-            setCacheLoadedForFile(fileName);
-            return;
-        }
-
         // Render all cards to get their fields for hash verification
         const loadCachedData = async () => {
             const allCards = Array.from(collection.cards.values());
-            const cardsWithFields: Array<{ id: number; fields: { name: string; value: string }[] }> = [];
+            const cardsWithFields: Array<{ id: number; fields: { name: string; value: string }[]; deckName: string }> = [];
 
             // Render cards in batches to avoid blocking
             for (const card of allCards) {
                 try {
                     const rendered = await renderCard(collection, card);
-                    cardsWithFields.push({ id: card.id, fields: rendered.fields });
+                    cardsWithFields.push({ id: card.id, fields: rendered.fields, deckName: rendered.deckName });
                 } catch (e) {
                     // Skip cards that fail to render
                 }
@@ -255,7 +248,7 @@ function App() {
         try {
             const result = await analyzeCard(selectedCard, llmConfig, additionalPrompt);
             setAnalysisResult(result);
-            cacheAnalysis(selectedCardId, result, selectedCard.fields);
+            cacheAnalysis(selectedCardId, result, selectedCard.fields, selectedCard.deckName);
         } catch (error) {
             console.error('Analysis failed:', error);
             const errorMessage = error instanceof Error ? error.message : 'Analysis failed';
@@ -275,7 +268,7 @@ function App() {
                 suggestedCards: [],
                 deleteOriginal: false,
                 error: errorMessage
-            }, selectedCard.fields);
+            }, selectedCard.fields, selectedCard.deckName);
         } finally {
             setIsAnalyzing(false);
         }
@@ -315,10 +308,10 @@ function App() {
                 collection,
                 cards,
                 llmConfig,
-                (current, total, cardId, cardResult, fields) => {
+                (current, total, cardId, cardResult, fields, deckName) => {
                     setDeckAnalysisProgress({ current, total });
                     if (cardId && cardResult) {
-                        cacheAnalysis(cardId, cardResult, fields);
+                        cacheAnalysis(cardId, cardResult, fields, deckName);
                     }
                 },
                 isDeckAnalysisCancelled,

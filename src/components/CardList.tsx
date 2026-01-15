@@ -1,5 +1,5 @@
 import React, { useMemo, useCallback, useState } from 'react';
-import { CreditCard, Tag, Layers, Search, X, CheckCircle, AlertCircle, Wand2, Trash2, Undo2 } from 'lucide-react';
+import { CreditCard, Tag, Layers, Search, X, CheckCircle, AlertCircle, Wand2, Trash2, Undo2, ArrowUpDown, ChevronDown } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 import { renderCard, getCardTypeName } from '../utils/cardRenderer';
 import { getCardsInDeck } from '../utils/ankiParser';
@@ -156,6 +156,8 @@ export const CardList: React.FC = () => {
     const [isLoading, setIsLoading] = React.useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const [includeSubdecks, setIncludeSubdecks] = useState(true);
+    const [sortBy, setSortBy] = useState<'default' | 'score-asc' | 'score-desc' | 'state'>('default');
+    const [showSortMenu, setShowSortMenu] = useState(false);
 
     const allCards = useMemo(() => {
         if (!collection || selectedDeckId === null) return [];
@@ -168,7 +170,7 @@ export const CardList: React.FC = () => {
     }, [allCards, isGeneratedCard]);
 
     // Filter cards based on search query
-    const cards = useMemo(() => {
+    const filteredCards = useMemo(() => {
         if (!searchQuery.trim()) return allCards;
 
         const query = searchQuery.toLowerCase();
@@ -180,6 +182,31 @@ export const CardList: React.FC = () => {
             return searchText.includes(query);
         });
     }, [allCards, searchQuery, renderedCards]);
+
+    // Sort cards based on sort option
+    const cards = useMemo(() => {
+        if (sortBy === 'default') return filteredCards;
+
+        return [...filteredCards].sort((a, b) => {
+            if (sortBy === 'score-asc' || sortBy === 'score-desc') {
+                const scoreA = analysisCache.get(a.id)?.feedback?.overallScore ?? -1;
+                const scoreB = analysisCache.get(b.id)?.feedback?.overallScore ?? -1;
+                return sortBy === 'score-asc' ? scoreA - scoreB : scoreB - scoreA;
+            }
+
+            if (sortBy === 'state') {
+                // Priority: deleted (0) > new (1) > existing (2)
+                const getStatePriority = (cardId: number) => {
+                    if (isCardMarkedForDeletion(cardId)) return 0;
+                    if (isGeneratedCard(cardId)) return 1;
+                    return 2;
+                };
+                return getStatePriority(a.id) - getStatePriority(b.id);
+            }
+
+            return 0;
+        });
+    }, [filteredCards, sortBy, analysisCache, isCardMarkedForDeletion, isGeneratedCard]);
 
     // Render cards when selection changes
     React.useEffect(() => {
@@ -257,15 +284,72 @@ export const CardList: React.FC = () => {
                     )}
                 </div>
 
-                <label className="flex items-center gap-2 text-xs text-gray-400 cursor-pointer">
-                    <input
-                        type="checkbox"
-                        checked={includeSubdecks}
-                        onChange={(e) => setIncludeSubdecks(e.target.checked)}
-                        className="rounded border-gray-600 bg-gray-700 text-blue-500 focus:ring-blue-500"
-                    />
-                    Include subdecks
-                </label>
+                <div className="flex items-center justify-between">
+                    <label className="flex items-center gap-2 text-xs text-gray-400 cursor-pointer">
+                        <input
+                            type="checkbox"
+                            checked={includeSubdecks}
+                            onChange={(e) => setIncludeSubdecks(e.target.checked)}
+                            className="rounded border-gray-600 bg-gray-700 text-blue-500 focus:ring-blue-500"
+                        />
+                        Include subdecks
+                    </label>
+
+                    {/* Sort dropdown */}
+                    <div className="relative">
+                        <button
+                            onClick={() => setShowSortMenu(!showSortMenu)}
+                            className={`flex items-center gap-1.5 px-2 py-1 text-xs rounded transition-colors ${sortBy !== 'default'
+                                ? 'bg-blue-600 text-white'
+                                : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                                }`}
+                        >
+                            <ArrowUpDown className="w-3 h-3" />
+                            <span>
+                                {sortBy === 'default' && 'Sort'}
+                                {sortBy === 'score-asc' && 'Score ↑'}
+                                {sortBy === 'score-desc' && 'Score ↓'}
+                                {sortBy === 'state' && 'State'}
+                            </span>
+                            <ChevronDown className="w-3 h-3" />
+                        </button>
+
+                        {showSortMenu && (
+                            <>
+                                <div
+                                    className="fixed inset-0 z-10"
+                                    onClick={() => setShowSortMenu(false)}
+                                />
+                                <div className="absolute right-0 top-full mt-1 z-20 bg-gray-800 border border-gray-600 rounded-lg shadow-lg py-1 min-w-[140px]">
+                                    <button
+                                        onClick={() => { setSortBy('default'); setShowSortMenu(false); }}
+                                        className={`w-full px-3 py-1.5 text-left text-xs hover:bg-gray-700 ${sortBy === 'default' ? 'text-blue-400' : 'text-gray-300'}`}
+                                    >
+                                        Default order
+                                    </button>
+                                    <button
+                                        onClick={() => { setSortBy('score-desc'); setShowSortMenu(false); }}
+                                        className={`w-full px-3 py-1.5 text-left text-xs hover:bg-gray-700 ${sortBy === 'score-desc' ? 'text-blue-400' : 'text-gray-300'}`}
+                                    >
+                                        Score (high → low)
+                                    </button>
+                                    <button
+                                        onClick={() => { setSortBy('score-asc'); setShowSortMenu(false); }}
+                                        className={`w-full px-3 py-1.5 text-left text-xs hover:bg-gray-700 ${sortBy === 'score-asc' ? 'text-blue-400' : 'text-gray-300'}`}
+                                    >
+                                        Score (low → high)
+                                    </button>
+                                    <button
+                                        onClick={() => { setSortBy('state'); setShowSortMenu(false); }}
+                                        className={`w-full px-3 py-1.5 text-left text-xs hover:bg-gray-700 ${sortBy === 'state' ? 'text-blue-400' : 'text-gray-300'}`}
+                                    >
+                                        State (deleted, new, existing)
+                                    </button>
+                                </div>
+                            </>
+                        )}
+                    </div>
+                </div>
             </div>
 
             {/* Cards header */}
