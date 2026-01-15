@@ -1,4 +1,4 @@
-import type { LLMProvider, LLMConfig, LLMAnalysisResult, RenderedCard, DeckAnalysisResult, AnkiDeck, AnkiCard, AnkiCollection, SuggestedCard } from '../types';
+import type { LLMProvider, LLMConfig, LLMAnalysisResult, RenderedCard, DeckAnalysisResult, AnkiDeck, AnkiCard, AnkiCollection, SuggestedCard, KnowledgeCoverage } from '../types';
 import { renderCard } from './cardRenderer';
 import { Ollama } from 'ollama/browser';
 
@@ -365,8 +365,12 @@ export function getDefaultConfig(): LLMConfig {
     systemPrompt: DEFAULT_SYSTEM_PROMPT,
     systemPromptVersion: SYSTEM_PROMPT_VERSION,
     sendImages: true,
-    maxDeckAnalysisCards: 50,
-    concurrentDeckAnalysis: false
+    maxDeckAnalysisCards: 100,
+    concurrentDeckAnalysis: false,
+    requestDelayMs: 2000, // 2 seconds default delay between requests
+    suggestedCardsLayout: 'carousel', // Default to carousel view
+    inheritCardMetadata: false, // New cards start fresh by default
+    darkMode: true // Dark mode by default
   };
 }
 
@@ -963,20 +967,22 @@ function parseAnalysisResponse(content: string): LLMAnalysisResult {
 }
 
 // Deck analysis function
-export async function analyzeDeck(
+/**
+ * Analyze individual cards in a deck. Stops immediately on error.
+ * This only runs LLM analysis on cards, does NOT generate deck-level insights.
+ */
+export async function analyzeCardsInDeck(
   collection: AnkiCollection,
-  deck: AnkiDeck,
   cards: AnkiCard[],
   config: LLMConfig,
-  additionalPrompt?: string,
-  onProgress?: (current: number, total: number, cardId?: number, result?: LLMAnalysisResult) => void,
+  onProgress?: (current: number, total: number, cardId?: number, result?: LLMAnalysisResult, fields?: { name: string; value: string }[]) => void,
   isCancelled?: () => boolean,
   existingCache?: Map<number, LLMAnalysisResult>
-): Promise<DeckAnalysisResult> {
+): Promise<{ results: { cardId: number; result: LLMAnalysisResult }[]; error?: string }> {
   const results: { cardId: number; result: LLMAnalysisResult }[] = [];
   
   // Analyze cards (use configurable limit)
-  const maxCards = config.maxDeckAnalysisCards || 50;
+  const maxCards = config.maxDeckAnalysisCards || 100;
   const cardsToAnalyze = cards.slice(0, maxCards);
   
   // Separate cards into already-analyzed and new
@@ -1001,65 +1007,57 @@ export async function analyzeDeck(
     onProgress?.(cachedCards.length, cardsToAnalyze.length);
   }
   
+  // If all cards are cached, we're done
+  if (newCards.length === 0) {
+    return { results };
+  }
+  
+  const delay = config.requestDelayMs || 2000;
+  
   if (config.concurrentDeckAnalysis) {
     // Concurrent analysis - process cards in parallel batches
-    const batchSize = 5; // Limit concurrent requests to avoid rate limiting
+    const batchSize = 5;
     let completed = cachedCards.length;
     
     for (let batchStart = 0; batchStart < newCards.length; batchStart += batchSize) {
       if (isCancelled?.()) break;
       
       const batch = newCards.slice(batchStart, batchStart + batchSize);
-      const batchPromises = batch.map(async (card) => {
-        if (isCancelled?.()) return null;
-        
-        try {
+      
+      try {
+        const batchPromises = batch.map(async (card) => {
+          if (isCancelled?.()) return null;
+          
           const renderedCard = await renderCard(collection, card);
           const result = await analyzeCard(renderedCard, config);
-          return { cardId: card.id, result };
-        } catch (e) {
-          console.error(`Failed to analyze card ${card.id}:`, e);
-          const errorResult: LLMAnalysisResult = { 
-            feedback: { 
-              overallScore: 0, 
-              issues: ['Failed to analyze card'], 
-              suggestions: [],
-              isUnambiguous: false,
-              isAtomic: false,
-              isRecognizable: false,
-              isActiveRecall: false,
-              reasoning: ''
-            }, 
-            suggestedCards: [],
-            deleteOriginal: false,
-            error: e instanceof Error ? e.message : 'Analysis failed'
-          };
-          return { cardId: card.id, result: errorResult };
+          return { cardId: card.id, result, fields: renderedCard.fields };
+        });
+        
+        const batchResults = await Promise.all(batchPromises);
+        
+        for (const result of batchResults) {
+          if (result) {
+            results.push({ cardId: result.cardId, result: result.result });
+            completed++;
+            onProgress?.(completed, cardsToAnalyze.length, result.cardId, result.result, result.fields);
+          }
         }
-      });
-      
-      const batchResults = await Promise.all(batchPromises);
-      
-      for (const result of batchResults) {
-        if (result) {
-          results.push(result);
-          completed++;
-          onProgress?.(completed, cardsToAnalyze.length, result.cardId, result.result);
-        }
+      } catch (e) {
+        // Stop on any error
+        const errorMessage = e instanceof Error ? e.message : 'Analysis failed';
+        console.error('Card analysis failed:', e);
+        return { results, error: errorMessage };
       }
       
-      // Small delay between batches to avoid rate limiting
-      if (batchStart + batchSize < newCards.length) {
-        await new Promise(r => setTimeout(r, 100));
+      // Delay between batches
+      if (batchStart + batchSize < newCards.length && !isCancelled?.()) {
+        await new Promise(r => setTimeout(r, delay));
       }
     }
   } else {
     // Serial analysis - process cards one at a time
     for (let i = 0; i < newCards.length; i++) {
-      // Check for cancellation
-      if (isCancelled?.()) {
-        break;
-      }
+      if (isCancelled?.()) break;
       
       const card = newCards[i];
       const currentProgress = cachedCards.length + i + 1;
@@ -1069,30 +1067,88 @@ export async function analyzeDeck(
         const renderedCard = await renderCard(collection, card);
         const result = await analyzeCard(renderedCard, config);
         results.push({ cardId: card.id, result });
-        onProgress?.(currentProgress, cardsToAnalyze.length, card.id, result);
+        onProgress?.(currentProgress, cardsToAnalyze.length, card.id, result, renderedCard.fields);
       } catch (e) {
+        // Stop on any error
+        const errorMessage = e instanceof Error ? e.message : 'Analysis failed';
         console.error(`Failed to analyze card ${card.id}:`, e);
-        const errorResult: LLMAnalysisResult = { 
-          feedback: { 
-            overallScore: 0, 
-            issues: ['Failed to analyze card'], 
-            suggestions: [],
-            isUnambiguous: false,
-            isAtomic: false,
-            isRecognizable: false,
-            isActiveRecall: false,
-            reasoning: ''
-          }, 
-          suggestedCards: [],
-          deleteOriginal: false,
-          error: e instanceof Error ? e.message : 'Analysis failed'
-        };
-        results.push({ cardId: card.id, result: errorResult });
-        onProgress?.(currentProgress, cardsToAnalyze.length, card.id);
+        return { results, error: errorMessage };
       }
       
-      // Small delay to avoid rate limiting
-      await new Promise(r => setTimeout(r, 200));
+      // Delay between requests
+      if (i < newCards.length - 1 && !isCancelled?.()) {
+        await new Promise(r => setTimeout(r, delay));
+      }
+    }
+  }
+  
+  return { results };
+}
+
+/**
+ * Generate deck-level insights from already-analyzed cards.
+ * This uses the cache only - does NOT analyze individual cards.
+ */
+export async function generateDeckInsights(
+  deck: AnkiDeck,
+  totalCards: number,
+  analysisCache: Map<number, LLMAnalysisResult>,
+  cardIds: number[],
+  config: LLMConfig,
+  additionalPrompt?: string,
+  collection?: AnkiCollection,
+  cards?: AnkiCard[]
+): Promise<DeckAnalysisResult> {
+  // Gather results from cache
+  const results: { cardId: number; result: LLMAnalysisResult }[] = [];
+  for (const cardId of cardIds) {
+    const cached = analysisCache.get(cardId);
+    if (cached && !cached.error) {
+      results.push({ cardId, result: cached });
+    }
+  }
+  
+  if (results.length === 0) {
+    return {
+      deckId: deck.id,
+      deckName: deck.name,
+      totalCards,
+      analyzedCards: 0,
+      averageScore: 0,
+      scoreDistribution: [],
+      knowledgeCoverage: null,
+      deckSummary: '',
+      suggestedNewCards: [],
+      addedSuggestedCardIndices: [],
+      totalSuggestedFromCards: 0,
+      error: 'No analyzed cards to generate insights from. Please analyze cards first.'
+    };
+  }
+  
+  // Render sample cards to get actual content for knowledge coverage analysis
+  let cardContents: { front: string; back: string }[] = [];
+  if (collection && cards && cards.length > 0) {
+    // Take a sample of cards spread across the deck
+    const sampleSize = Math.min(30, cards.length);
+    const step = Math.max(1, Math.floor(cards.length / sampleSize));
+    const sampleCards = [];
+    for (let i = 0; i < cards.length && sampleCards.length < sampleSize; i += step) {
+      sampleCards.push(cards[i]);
+    }
+    
+    // Render the sampled cards
+    for (const card of sampleCards) {
+      try {
+        const rendered = await renderCard(collection, card);
+        // Strip HTML tags for cleaner content
+        const stripHtml = (html: string) => html.replace(/<[^>]*>/g, '').trim();
+        cardContents.push({
+          front: stripHtml(rendered.front).slice(0, 300),
+          back: stripHtml(rendered.back).slice(0, 300)
+        });
+      } catch {
+        // Skip cards that fail to render
+      }
     }
   }
   
@@ -1100,7 +1156,7 @@ export async function analyzeDeck(
   const scores = results.map(r => r.result.feedback.overallScore);
   const averageScore = scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : 0;
   
-  // Score distribution - use floor instead of round for proper bucketing
+  // Score distribution
   const scoreDistribution: { score: number; count: number }[] = [];
   for (let score = 1; score <= 10; score++) {
     scoreDistribution.push({
@@ -1109,243 +1165,204 @@ export async function analyzeDeck(
     });
   }
   
-  // Common issues - keep full text for classification
-  const issueCount = new Map<string, number>();
-  for (const { result } of results) {
-    for (const issue of result.feedback.issues) {
-      issueCount.set(issue, (issueCount.get(issue) || 0) + 1);
-    }
-  }
-  const commonIssues = Array.from(issueCount.entries())
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 20)
-    .map(([issue, count]) => ({ issue, count }));
-  
   // Count total suggested cards from all card analyses
   const totalSuggestedFromCards = results.reduce((sum, r) => sum + r.result.suggestedCards.length, 0);
   
-  // Classify issues using LLM
-  let classifiedIssues: { category: string; issues: { issue: string; count: number }[] }[] = [];
-  if (commonIssues.length > 0 && !isCancelled?.()) {
-    classifiedIssues = await classifyIssues(commonIssues, config);
-  }
-  
-  // Generate deck summary and suggestions using LLM
-  let summaryAndSuggestions: { summary: string; suggestedCards: SuggestedCard[]; error?: string } = { summary: '', suggestedCards: [] };
-  if (!isCancelled?.()) {
-    summaryAndSuggestions = await generateDeckSummary(
-      deck,
-      results,
-      config,
-      additionalPrompt
-    );
-  }
+  // Generate deck summary, knowledge coverage, and suggestions using LLM
+  const summaryAndSuggestions = await generateDeckSummaryWithCoverage(
+    deck,
+    results,
+    config,
+    additionalPrompt,
+    cardContents
+  );
   
   return {
     deckId: deck.id,
     deckName: deck.name,
-    totalCards: cards.length,
+    totalCards,
     analyzedCards: results.length,
     averageScore: Math.round(averageScore * 10) / 10,
     scoreDistribution,
-    commonIssues,
-    classifiedIssues,
+    knowledgeCoverage: summaryAndSuggestions.knowledgeCoverage,
     deckSummary: summaryAndSuggestions.summary,
     suggestedNewCards: summaryAndSuggestions.suggestedCards,
+    addedSuggestedCardIndices: [],
     totalSuggestedFromCards,
     error: summaryAndSuggestions.error
   };
 }
 
-// Classify issues into categories using LLM
-async function classifyIssues(
-  issues: { issue: string; count: number }[],
-  config: LLMConfig
-): Promise<{ category: string; issues: { issue: string; count: number }[] }[]> {
-  const provider = LLM_PROVIDERS.find(p => p.id === config.providerId);
-  if (!provider) return [];
+// Legacy function for backwards compatibility - combines both steps
+export async function analyzeDeck(
+  collection: AnkiCollection,
+  deck: AnkiDeck,
+  cards: AnkiCard[],
+  config: LLMConfig,
+  additionalPrompt?: string,
+  onProgress?: (current: number, total: number, cardId?: number, result?: LLMAnalysisResult, fields?: { name: string; value: string }[]) => void,
+  isCancelled?: () => boolean,
+  existingCache?: Map<number, LLMAnalysisResult>
+): Promise<DeckAnalysisResult> {
+  // First analyze cards
+  const { results, error } = await analyzeCardsInDeck(
+    collection,
+    cards,
+    config,
+    onProgress,
+    isCancelled,
+    existingCache
+  );
   
-  const systemPrompt = `You are a card quality analyst. Group these flashcard issues into 3-6 meaningful categories.
-
-Respond in JSON format:
-{
-  "categories": [
-    {
-      "category": "Category Name",
-      "issueIndices": [0, 2, 5]
-    }
-  ]
-}
-
-issueIndices are the 0-based indices of the issues that belong to each category.`;
-
-  const userMessage = `Classify these flashcard issues into categories:
-
-${issues.map((i, idx) => `${idx}. ${i.issue} (${i.count} cards)`).join('\n')}`;
-
-  try {
-    let response: Response;
-    const apiKey = getApiKey(config);
-    
-    if (config.providerId === 'anthropic') {
-      response = await fetch(`${provider.baseUrl}/messages`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': apiKey,
-          'anthropic-version': '2023-06-01',
-          'anthropic-dangerous-direct-browser-access': 'true'
-        },
-        body: JSON.stringify({
-          model: config.model,
-          max_tokens: 1024,
-          system: systemPrompt,
-          messages: [{ role: 'user', content: userMessage }]
-        })
-      });
-      
-      if (!response.ok) return [];
-      const data = await response.json();
-      return parseClassificationResponse(data.content[0].text, issues);
-    } else {
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
-      if (config.providerId === 'openrouter') {
-        headers['HTTP-Referer'] = window.location.origin;
-        headers['X-Title'] = 'LLMAnki';
-      }
-      
-      response = await fetch(`${provider.baseUrl}/chat/completions`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          model: config.model,
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: userMessage }
-          ],
-          temperature: 0.3,
-          max_tokens: 1024
-        })
-      });
-      
-      if (!response.ok) return [];
-      const data = await response.json();
-      return parseClassificationResponse(data.choices[0].message.content, issues);
-    }
-  } catch (e) {
-    console.error('Failed to classify issues:', e);
-    return [];
+  if (error) {
+    // Return partial results with error
+    return {
+      deckId: deck.id,
+      deckName: deck.name,
+      totalCards: cards.length,
+      analyzedCards: results.length,
+      averageScore: 0,
+      scoreDistribution: [],
+      knowledgeCoverage: null,
+      deckSummary: '',
+      suggestedNewCards: [],
+      addedSuggestedCardIndices: [],
+      totalSuggestedFromCards: 0,
+      error
+    };
   }
-}
-
-function parseClassificationResponse(
-  content: string,
-  issues: { issue: string; count: number }[]
-): { category: string; issues: { issue: string; count: number }[] }[] {
-  let jsonStr = content;
-  const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (jsonMatch) jsonStr = jsonMatch[1];
   
-  try {
-    const parsed = JSON.parse(jsonStr.trim());
-    const result: { category: string; issues: { issue: string; count: number }[] }[] = [];
+  if (isCancelled?.()) {
+    // Return partial results if cancelled
+    const scores = results.map(r => r.result.feedback.overallScore);
+    const averageScore = scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : 0;
     
-    for (const cat of parsed.categories || []) {
-      const categoryIssues = (cat.issueIndices || [])
-        .filter((idx: number) => idx >= 0 && idx < issues.length)
-        .map((idx: number) => issues[idx]);
-      
-      if (categoryIssues.length > 0) {
-        result.push({
-          category: cat.category,
-          issues: categoryIssues
-        });
-      }
-    }
-    
-    return result;
-  } catch {
-    return [];
+    return {
+      deckId: deck.id,
+      deckName: deck.name,
+      totalCards: cards.length,
+      analyzedCards: results.length,
+      averageScore: Math.round(averageScore * 10) / 10,
+      scoreDistribution: [],
+      knowledgeCoverage: null,
+      deckSummary: '',
+      suggestedNewCards: [],
+      addedSuggestedCardIndices: [],
+      totalSuggestedFromCards: 0
+    };
   }
+  
+  // Build a cache from results for generateDeckInsights
+  const resultsCache = new Map<number, LLMAnalysisResult>();
+  for (const { cardId, result } of results) {
+    resultsCache.set(cardId, result);
+  }
+  
+  // Generate insights
+  return generateDeckInsights(
+    deck,
+    cards.length,
+    resultsCache,
+    results.map(r => r.cardId),
+    config,
+    additionalPrompt
+  );
 }
 
-async function generateDeckSummary(
+// Generate deck summary with knowledge coverage analysis
+async function generateDeckSummaryWithCoverage(
   deck: AnkiDeck,
   results: { cardId: number; result: LLMAnalysisResult }[],
   config: LLMConfig,
-  additionalPrompt?: string
-): Promise<{ summary: string; suggestedCards: SuggestedCard[]; error?: string }> {
+  additionalPrompt?: string,
+  cardContents?: { front: string; back: string }[]
+): Promise<{ summary: string; knowledgeCoverage: KnowledgeCoverage | null; suggestedCards: SuggestedCard[]; error?: string }> {
   const provider = LLM_PROVIDERS.find(p => p.id === config.providerId);
   if (!provider) {
-    return { summary: '', suggestedCards: [], error: 'No LLM provider configured' };
+    return { summary: '', knowledgeCoverage: null, suggestedCards: [], error: 'No LLM provider configured' };
   }
   
-  // Build a summary of the deck contents
-  const sampleCards: string[] = [];
-  for (const { result } of results.slice(0, 10)) {
-    if (result.feedback.reasoning) {
-      sampleCards.push(result.feedback.reasoning.slice(0, 200));
-    }
-  }
-  
-  const allIssues = results.flatMap(r => r.result.feedback.issues);
   const scores = results.map(r => r.result.feedback.overallScore);
   const avgScore = scores.length > 0 ? (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(1) : 'N/A';
   
-  const systemPrompt = `You are an expert Anki deck reviewer. Based on the analysis of individual cards in a deck, provide:
-1. A summary of what this deck covers (topics, concepts)
-2. Overall quality assessment
-3. Suggest 3-5 NEW cards that would complement this deck well
+  const systemPrompt = `You are an expert curriculum designer and subject matter analyst. Your task is to analyze flashcard content to assess KNOWLEDGE COVERAGE of the subject matter.
+
+IMPORTANT: Focus on the SUBJECT MATTER being studied, NOT on Anki card quality. Analyze what topics/concepts the cards cover and what important topics are MISSING from the deck.
 
 You MUST respond with valid JSON only. No markdown, no code blocks, just raw JSON:
 
 {
-  "summary": "A 2-3 paragraph summary of the deck contents and quality assessment.",
+  "summary": "A 2-3 paragraph summary describing what subject/field this deck covers and how comprehensive it is.",
+  "knowledgeCoverage": {
+    "overallCoverage": "excellent|good|fair|poor",
+    "coverageScore": 7,
+    "summary": "A paragraph explaining how well this deck covers the subject matter. Focus on topic breadth and depth.",
+    "coveredTopics": ["Specific subject topic 1", "Specific subject topic 2", "Specific subject topic 3"],
+    "gaps": [
+      {
+        "topic": "Missing Subject Matter Topic",
+        "importance": "high|medium|low",
+        "description": "What specific knowledge in this field is not covered by the cards"
+      }
+    ],
+    "recommendations": [
+      "Add cards covering [specific subject matter topic]",
+      "Include more depth on [specific concept in the field]"
+    ]
+  },
   "suggestedCards": [
     {
       "type": "basic",
       "fields": [
-        {"name": "Front", "value": "Question text here"},
-        {"name": "Back", "value": "Answer text here"}
+        {"name": "Front", "value": "Question about missing subject matter"},
+        {"name": "Back", "value": "Answer with the missing knowledge"}
       ],
-      "explanation": "Why this card would be valuable"
-    },
-    {
-      "type": "cloze",
-      "fields": [
-        {"name": "Text", "value": "The {{c1::answer}} is hidden in context"},
-        {"name": "Extra", "value": "Optional extra information shown after reveal"}
-      ],
-      "explanation": "Why this card would be valuable"
+      "explanation": "This card fills the gap in [subject topic] by covering [specific knowledge]"
     }
   ]
 }
 
-IMPORTANT RULES:
-- "type" must be exactly "basic" or "cloze"
-- For basic cards: use field names "Front" and "Back"
-- For cloze cards: use field names "Text" and optionally "Extra"
-- Cloze syntax: {{c1::answer}} - do NOT include a trailing :: unless adding a hint
-- With hint: {{c1::answer::hint}} - only when a hint is genuinely helpful
-- IMPORTANT: When clozes are revealed, the hidden answer is shown automatically. Never put the cloze answers in the Extra field - that would be redundant. Extra is for additional context only.
-- Return 3-5 suggested cards that fill gaps in the deck's coverage`;
+CRITICAL INSTRUCTIONS:
+1. Analyze the SUBJECT MATTER being studied, not card formatting or Anki best practices
+2. coveredTopics should list actual subject matter topics the cards teach (e.g., "Photosynthesis", "World War 2 causes", "Python list comprehensions")
+3. gaps should identify SUBJECT MATTER topics that are missing or under-covered in this field
+4. DO NOT mention card quality, formatting, or Anki-related issues in gaps - only missing subject knowledge
+5. Suggest 3-5 cards that teach MISSING SUBJECT MATTER content
+6. "type" must be exactly "basic" or "cloze"
+7. For basic cards: use field names "Front" and "Back"
+8. For cloze cards: use field names "Text" and optionally "Extra"
+9. Cloze syntax: {{c1::answer}} - do NOT include a trailing :: unless adding a hint
+10. coverageScore should be 1-10 (10 = excellent subject matter coverage)`;
 
-  let userMessage = `Analyze this Anki deck and suggest improvements:
+  // Build card content list for the LLM
+  let cardContentSection = '';
+  if (cardContents && cardContents.length > 0) {
+    cardContentSection = `\n\nACTUAL CARD CONTENT (sample of ${cardContents.length} cards):\n`;
+    cardContentSection += cardContents.slice(0, 25).map((c, i) => 
+      `Card ${i + 1}:\n  Q: ${c.front}\n  A: ${c.back}`
+    ).join('\n\n');
+  }
+
+  let userMessage = `Analyze the SUBJECT MATTER coverage of this Anki deck:
 
 Deck Name: ${deck.name}
-Total Cards Analyzed: ${results.length}
-Average Score: ${avgScore}/10
-
-Common Issues Found:
-${allIssues.slice(0, 20).map(i => `- ${i}`).join('\n')}
-
-Sample Card Analyses:
-${sampleCards.join('\n---\n')}`;
+Total Cards: ${results.length}
+Average Card Quality Score: ${avgScore}/10
+${cardContentSection}`;
 
   if (additionalPrompt?.trim()) {
     userMessage += `\n\nUser's Focus/Request: ${additionalPrompt.trim()}`;
   }
+
+  userMessage += `
+
+Based on the card content above, identify:
+1. What subject/field is this deck teaching?
+2. What specific topics within that subject are well-covered?
+3. What important topics in this subject are MISSING or need more cards?
+4. Suggest new cards to fill the knowledge gaps.
+
+Remember: Focus on SUBJECT MATTER gaps, not card formatting or Anki techniques.`;
 
   try {
     let response: Response;
@@ -1374,7 +1391,7 @@ ${sampleCards.join('\n---\n')}`;
       }
       
       const data = await response.json();
-      return parseDeckSummaryResponse(data.content[0].text);
+      return parseDeckCoverageResponse(data.content[0].text);
     } else {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
@@ -1403,21 +1420,22 @@ ${sampleCards.join('\n---\n')}`;
       }
       
       const data = await response.json();
-      return parseDeckSummaryResponse(data.choices[0].message.content);
+      return parseDeckCoverageResponse(data.choices[0].message.content);
     }
   } catch (e) {
-    console.error('Failed to generate deck summary:', e);
+    console.error('Failed to generate deck summary with coverage:', e);
     const errorMessage = e instanceof Error ? e.message : String(e);
     return { 
       summary: '', 
+      knowledgeCoverage: null,
       suggestedCards: [], 
-      error: `Failed to generate deck summary: ${errorMessage}` 
+      error: `Failed to generate deck analysis: ${errorMessage}` 
     };
   }
 }
 
-function parseDeckSummaryResponse(content: string): { summary: string; suggestedCards: SuggestedCard[]; error?: string } {
-  console.log('Parsing deck summary response:', content.substring(0, 500));
+function parseDeckCoverageResponse(content: string): { summary: string; knowledgeCoverage: KnowledgeCoverage | null; suggestedCards: SuggestedCard[]; error?: string } {
+  console.log('Parsing deck coverage response:', content.substring(0, 500));
   
   let jsonStr = content;
   
@@ -1426,8 +1444,7 @@ function parseDeckSummaryResponse(content: string): { summary: string; suggested
   if (jsonMatch) {
     jsonStr = jsonMatch[1];
   } else {
-    // Try to find the outermost JSON object containing "summary"
-    // Use a more careful approach to find balanced braces
+    // Try to find the outermost JSON object
     const startIdx = content.indexOf('{');
     if (startIdx !== -1) {
       let braceCount = 0;
@@ -1446,17 +1463,41 @@ function parseDeckSummaryResponse(content: string): { summary: string; suggested
   
   try {
     const parsed = JSON.parse(jsonStr.trim());
-    console.log('Parsed deck summary:', { summary: parsed.summary?.substring(0, 100), cardsCount: parsed.suggestedCards?.length });
+    console.log('Parsed deck coverage:', { 
+      summary: parsed.summary?.substring(0, 100), 
+      hasKnowledgeCoverage: !!parsed.knowledgeCoverage,
+      cardsCount: parsed.suggestedCards?.length 
+    });
+    
+    // Parse knowledge coverage
+    let knowledgeCoverage: KnowledgeCoverage | null = null;
+    if (parsed.knowledgeCoverage) {
+      const kc = parsed.knowledgeCoverage;
+      const validCoverage = ['excellent', 'good', 'fair', 'poor'].includes(kc.overallCoverage) 
+        ? kc.overallCoverage 
+        : 'fair';
+      
+      knowledgeCoverage = {
+        overallCoverage: validCoverage,
+        coverageScore: typeof kc.coverageScore === 'number' ? Math.min(10, Math.max(1, kc.coverageScore)) : 5,
+        summary: String(kc.summary || ''),
+        coveredTopics: Array.isArray(kc.coveredTopics) ? kc.coveredTopics.map(String) : [],
+        gaps: Array.isArray(kc.gaps) ? kc.gaps.map((g: any) => ({
+          topic: String(g.topic || ''),
+          importance: ['high', 'medium', 'low'].includes(g.importance) ? g.importance : 'medium',
+          description: String(g.description || '')
+        })) : [],
+        recommendations: Array.isArray(kc.recommendations) ? kc.recommendations.map(String) : []
+      };
+    }
     
     // Validate and transform suggestedCards
     const suggestedCards: SuggestedCard[] = [];
     if (Array.isArray(parsed.suggestedCards)) {
       for (const card of parsed.suggestedCards) {
         if (card && typeof card === 'object') {
-          // Ensure type is valid
           const type = ['basic', 'cloze', 'basic-reversed'].includes(card.type) ? card.type : 'basic';
           
-          // Ensure fields is an array with proper structure
           let fields: { name: string; value: string }[] = [];
           if (Array.isArray(card.fields)) {
             fields = card.fields.map((f: any) => ({
@@ -1476,28 +1517,18 @@ function parseDeckSummaryResponse(content: string): { summary: string; suggested
     
     return {
       summary: String(parsed.summary || 'No summary available'),
+      knowledgeCoverage,
       suggestedCards
     };
   } catch (e) {
-    console.error('Failed to parse deck summary JSON:', e, 'Content:', jsonStr.substring(0, 500));
+    console.error('Failed to parse deck coverage JSON:', e, 'Content:', jsonStr.substring(0, 500));
     
-    // If JSON parsing failed, try to extract just the summary text
-    // Look for "summary": "..." pattern
+    // Fallback: try to extract just the summary text
     const summaryMatch = content.match(/"summary"\s*:\s*"([^"]+)"/);
     if (summaryMatch) {
-      return { summary: summaryMatch[1], suggestedCards: [] };
+      return { summary: summaryMatch[1], knowledgeCoverage: null, suggestedCards: [] };
     }
     
-    // Remove any JSON-like content and extract readable text
-    let cleanContent = content;
-    cleanContent = cleanContent.replace(/```[\s\S]*?```/g, '');
-    cleanContent = cleanContent.replace(/\{[\s\S]*?\}/g, '');
-    cleanContent = cleanContent.replace(/\s+/g, ' ').trim();
-    
-    if (cleanContent.length > 20) {
-      return { summary: cleanContent, suggestedCards: [] };
-    }
-    
-    return { summary: 'Unable to parse deck summary. Please try again.', suggestedCards: [] };
+    return { summary: 'Unable to parse deck analysis. Please try again.', knowledgeCoverage: null, suggestedCards: [] };
   }
 }

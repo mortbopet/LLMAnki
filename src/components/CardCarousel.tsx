@@ -1,7 +1,7 @@
 import React from 'react';
 import { Swiper, SwiperSlide } from 'swiper/react';
 import { Navigation, Pagination } from 'swiper/modules';
-import { Plus, Edit3, Trash2 } from 'lucide-react';
+import { Plus, Edit3, Trash2, Check } from 'lucide-react';
 import { CardViewer } from './CardViewer';
 import type { SuggestedCard } from '../types';
 import type { Swiper as SwiperType } from 'swiper';
@@ -17,6 +17,7 @@ interface CardCarouselProps {
     titlePrefix?: string;
     initialSlide?: number;
     onSlideChange?: (index: number) => void;
+    addedIndices?: number[];
 }
 
 export const CardCarousel: React.FC<CardCarouselProps> = ({
@@ -27,7 +28,8 @@ export const CardCarousel: React.FC<CardCarouselProps> = ({
     showActions = true,
     titlePrefix = 'Card',
     initialSlide = 0,
-    onSlideChange
+    onSlideChange,
+    addedIndices = []
 }) => {
     if (cards.length === 0) return null;
 
@@ -59,57 +61,74 @@ export const CardCarousel: React.FC<CardCarouselProps> = ({
                 }}
                 className="card-swiper"
             >
-                {cards.map((card, index) => (
-                    <SwiperSlide key={index}>
-                        <div className="relative group pb-4">
-                            <CardViewer
-                                card={card}
-                                title={`${titlePrefix} ${index + 1}`}
-                                isSuggestion
-                            />
-
-                            {card.explanation && (
-                                <p className="mt-2 text-sm text-gray-400 italic px-1">
-                                    {card.explanation}
-                                </p>
-                            )}
-
-                            {/* Action buttons */}
-                            {showActions && (
-                                <div className="absolute top-2 right-2 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity z-10">
-                                    {onEditCard && (
-                                        <button
-                                            onClick={() => onEditCard(index)}
-                                            className="p-2 bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors"
-                                            title="Edit card"
-                                        >
-                                            <Edit3 className="w-4 h-4" />
-                                        </button>
+                {cards.map((card, index) => {
+                    const isAdded = addedIndices.includes(index);
+                    return (
+                        <SwiperSlide key={index}>
+                            <div className={`relative group pb-4 ${isAdded ? 'opacity-50' : ''}`}>
+                                <div className={`rounded-lg shadow-lg shadow-black/30 transition-shadow overflow-hidden ${isAdded
+                                        ? 'ring-1 ring-gray-500/30'
+                                        : 'ring-1 ring-green-500/30 hover:shadow-xl hover:shadow-black/40'
+                                    }`}>
+                                    {/* Added Badge */}
+                                    {isAdded && (
+                                        <div className="px-4 py-2 bg-gray-700/80 border-b border-gray-600 flex items-center gap-2">
+                                            <Check className="w-4 h-4 text-green-400" />
+                                            <span className="text-sm text-green-400 font-medium">Added to deck</span>
+                                        </div>
                                     )}
-                                    {onRemoveCard && (
-                                        <button
-                                            onClick={() => onRemoveCard(index)}
-                                            className="p-2 bg-gray-700 hover:bg-red-600 rounded-lg transition-colors"
-                                            title="Remove suggestion"
-                                        >
-                                            <Trash2 className="w-4 h-4" />
-                                        </button>
+                                    {/* Explanation at top of card */}
+                                    {card.explanation && !isAdded && (
+                                        <div className="px-4 py-3 bg-gradient-to-r from-green-900/30 to-emerald-900/20 border-b border-green-500/20">
+                                            <p className="text-sm text-green-200/90 italic">
+                                                {card.explanation}
+                                            </p>
+                                        </div>
                                     )}
-                                    {onAddCard && (
-                                        <button
-                                            onClick={() => onAddCard(card, index)}
-                                            className="px-3 py-2 bg-green-600 hover:bg-green-700 rounded-lg transition-colors text-sm font-medium"
-                                            title="Add to deck"
-                                        >
-                                            <Plus className="w-4 h-4 inline mr-1" />
-                                            Add
-                                        </button>
-                                    )}
+                                    <CardViewer
+                                        card={card}
+                                        title={`${titlePrefix} ${index + 1}`}
+                                        isSuggestion
+                                    />
                                 </div>
-                            )}
-                        </div>
-                    </SwiperSlide>
-                ))}
+
+                                {/* Action buttons - only show if not already added */}
+                                {showActions && !isAdded && (
+                                    <div className="absolute top-2 right-2 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                                        {onEditCard && (
+                                            <button
+                                                onClick={() => onEditCard(index)}
+                                                className="p-2 bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors"
+                                                title="Edit card"
+                                            >
+                                                <Edit3 className="w-4 h-4" />
+                                            </button>
+                                        )}
+                                        {onRemoveCard && (
+                                            <button
+                                                onClick={() => onRemoveCard(index)}
+                                                className="p-2 bg-gray-700 hover:bg-red-600 rounded-lg transition-colors"
+                                                title="Remove suggestion"
+                                            >
+                                                <Trash2 className="w-4 h-4" />
+                                            </button>
+                                        )}
+                                        {onAddCard && (
+                                            <button
+                                                onClick={() => onAddCard(card, index)}
+                                                className="px-3 py-2 bg-green-600 hover:bg-green-700 rounded-lg transition-colors text-sm font-medium"
+                                                title="Add to deck"
+                                            >
+                                                <Plus className="w-4 h-4 inline mr-1" />
+                                                Add
+                                            </button>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        </SwiperSlide>
+                    );
+                })}
             </Swiper>
 
             <style>{`
@@ -135,21 +154,34 @@ export const CardCarousel: React.FC<CardCarouselProps> = ({
                 
                 .card-swiper .swiper-button-prev,
                 .card-swiper .swiper-button-next {
-                    color: #60a5fa;
-                    background: rgba(31, 41, 55, 0.9);
-                    width: 40px;
-                    height: 40px;
+                    color: #ffffff;
+                    background: #3b82f6;
+                    width: 36px;
+                    height: 36px;
                     border-radius: 50%;
-                    --swiper-navigation-size: 20px;
+                    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+                    transition: background-color 0.2s, transform 0.2s;
+                }
+                
+                .card-swiper .swiper-button-prev:after,
+                .card-swiper .swiper-button-next:after {
+                    font-size: 14px;
+                    font-weight: bold;
                 }
                 
                 .card-swiper .swiper-button-prev:hover,
                 .card-swiper .swiper-button-next:hover {
-                    background: rgba(55, 65, 81, 0.95);
+                    background: #2563eb;
+                    transform: scale(1.1);
                 }
                 
                 .card-swiper .swiper-button-disabled {
                     opacity: 0.3;
+                    background: #6b7280;
+                }
+                
+                .card-swiper .swiper-button-disabled:hover {
+                    transform: none;
                 }
                 
                 .card-swiper .swiper-pagination-bullet {

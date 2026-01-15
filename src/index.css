@@ -7,14 +7,226 @@
   line-height: 1.5;
   font-weight: 400;
 
+  /* Theme CSS variables - Light mode defaults */
+  --color-bg-primary: #f3f4f6;
+  --color-bg-secondary: #ffffff;
+  --color-bg-tertiary: #e5e7eb;
+  --color-bg-card: #ffffff;
+  --color-bg-hover: #f9fafb;
+  --color-text-primary: #1f2937;
+  --color-text-secondary: #4b5563;
+  --color-text-muted: #6b7280;
+  --color-border: #d1d5db;
+  --color-border-light: #e5e7eb;
+}
+
+/* Dark mode variables */
+html.dark {
+  --color-bg-primary: #1a1a2e;
+  --color-bg-secondary: #16162a;
+  --color-bg-tertiary: #1f2937;
+  --color-bg-card: #374151;
+  --color-bg-hover: #374151;
+  --color-text-primary: rgba(255, 255, 255, 0.87);
+  --color-text-secondary: #d1d5db;
+  --color-text-muted: #9ca3af;
+  --color-border: #4b5563;
+  --color-border-light: #374151;
+}
+
+/* Light mode defaults */
+html {
+  color-scheme: light;
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-primary);
+}
+
+/* Dark mode */
+html.dark {
   color-scheme: dark;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #1a1a2e;
 }
 
 body {
   margin: 0;
   min-height: 100vh;
+}
+
+/* Theme-aware component overrides */
+/* These ensure components work in both light and dark mode */
+
+/* Main app backgrounds */
+html:not(.dark) .bg-gray-900 {
+  background-color: #f3f4f6 !important;
+}
+
+html:not(.dark) .bg-gray-800 {
+  background-color: #ffffff !important;
+}
+
+html:not(.dark) .bg-gray-700 {
+  background-color: #f9fafb !important;
+}
+
+html:not(.dark) .bg-gray-750 {
+  background-color: #f3f4f6 !important;
+}
+
+html:not(.dark) .bg-anki-dark {
+  background-color: #f3f4f6 !important;
+}
+
+html:not(.dark) .bg-anki-darker {
+  background-color: #e5e7eb !important;
+}
+
+/* Text colors for light mode - improved contrast */
+html:not(.dark) .text-white {
+  color: #111827 !important;
+}
+
+html:not(.dark) .text-gray-100 {
+  color: #1f2937 !important;
+}
+
+html:not(.dark) .text-gray-200 {
+  color: #374151 !important;
+}
+
+html:not(.dark) .text-gray-300 {
+  color: #4b5563 !important;
+}
+
+html:not(.dark) .text-gray-400 {
+  color: #6b7280 !important;
+}
+
+html:not(.dark) .text-gray-500 {
+  color: #374151 !important;
+}
+
+html:not(.dark) .text-gray-600 {
+  color: #1f2937 !important;
+}
+
+/* Border colors for light mode */
+html:not(.dark) .border-gray-600 {
+  border-color: #d1d5db !important;
+}
+
+html:not(.dark) .border-gray-700 {
+  border-color: #e5e7eb !important;
+}
+
+html:not(.dark) .border-gray-800 {
+  border-color: #f3f4f6 !important;
+}
+
+/* Ring colors for light mode */
+html:not(.dark) .ring-gray-700 {
+  --tw-ring-color: #d1d5db !important;
+}
+
+/* Input backgrounds for light mode */
+html:not(.dark) input.bg-gray-700,
+html:not(.dark) select.bg-gray-700,
+html:not(.dark) textarea.bg-gray-700 {
+  background-color: #f9fafb !important;
+  border-color: #d1d5db !important;
+  color: #1f2937 !important;
+}
+
+/* Button hover states for light mode */
+html:not(.dark) .hover\:bg-gray-700:hover {
+  background-color: #e5e7eb !important;
+}
+
+html:not(.dark) .hover\:bg-gray-600:hover {
+  background-color: #d1d5db !important;
+}
+
+html:not(.dark) .hover\:bg-gray-500:hover {
+  background-color: #9ca3af !important;
+}
+
+/* Selected/active states need to stand out */
+html:not(.dark) .bg-blue-600 {
+  background-color: #2563eb !important;
+}
+
+html:not(.dark) .bg-green-600 {
+  background-color: #16a34a !important;
+}
+
+html:not(.dark) .text-blue-400 {
+  color: #2563eb !important;
+}
+
+html:not(.dark) .text-green-400 {
+  color: #16a34a !important;
+}
+
+/* Card viewer content should stay white in both modes */
+html:not(.dark) .prose.bg-white {
+  background-color: #ffffff !important;
+  color: #1f2937 !important;
+}
+
+html:not(.dark) .prose.bg-gray-100 {
+  background-color: #f3f4f6 !important;
+  color: #1f2937 !important;
+}
+
+/* Settings panel modal backdrop */
+html:not(.dark) .bg-black\/50 {
+  background-color: rgba(0, 0, 0, 0.3) !important;
+}
+
+/* Card list items */
+html:not(.dark) .bg-gray-800\/50 {
+  background-color: rgba(255, 255, 255, 0.8) !important;
+}
+
+html:not(.dark) .bg-gray-700\/50 {
+  background-color: rgba(249, 250, 251, 0.8) !important;
+}
+
+html:not(.dark) .bg-gray-800\/30 {
+  background-color: rgba(255, 255, 255, 0.5) !important;
+}
+
+/* Shadow adjustments for light mode */
+html:not(.dark) .shadow-black\/30 {
+  --tw-shadow-color: rgba(0, 0, 0, 0.1) !important;
+}
+
+html:not(.dark) .shadow-black\/40 {
+  --tw-shadow-color: rgba(0, 0, 0, 0.15) !important;
+}
+
+/* Suggested card explanation banner in light mode */
+html:not(.dark) .from-green-900\/30 {
+  --tw-gradient-from: rgba(20, 83, 45, 0.15) !important;
+}
+
+html:not(.dark) .to-emerald-900\/20 {
+  --tw-gradient-to: rgba(6, 78, 59, 0.1) !important;
+}
+
+html:not(.dark) .text-green-200\/90 {
+  color: rgba(22, 101, 52, 0.9) !important;
+}
+
+/* SVG chart text for light mode */
+html:not(.dark) .fill-gray-500 {
+  fill: #374151 !important;
+}
+
+html:not(.dark) svg line[stroke="#4B5563"] {
+  stroke: #d1d5db !important;
+}
+
+html:not(.dark) svg line[stroke="#6B7280"] {
+  stroke: #9ca3af !important;
 }
 
 /* Anki card styling */
@@ -45,28 +257,54 @@ body {
 
 /* Tree view */
 .tree-item {
-  @apply cursor-pointer hover:bg-gray-700 rounded px-2 py-1 transition-colors;
+  @apply cursor-pointer rounded px-2 py-1 transition-colors;
+}
+
+html.dark .tree-item {
+  @apply hover:bg-gray-700;
+}
+
+html:not(.dark) .tree-item {
+  @apply hover:bg-gray-200;
 }
 
 .tree-item.selected {
-  @apply bg-blue-600 hover:bg-blue-700;
+  @apply bg-blue-600 hover:bg-blue-700 text-white;
 }
 
-/* Scrollbar styling */
-::-webkit-scrollbar {
+/* Scrollbar styling - Dark mode */
+html.dark ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 
-::-webkit-scrollbar-track {
+html.dark ::-webkit-scrollbar-track {
   @apply bg-gray-800;
 }
 
-::-webkit-scrollbar-thumb {
+html.dark ::-webkit-scrollbar-thumb {
   @apply bg-gray-600 rounded;
 }
 
-::-webkit-scrollbar-thumb:hover {
+html.dark ::-webkit-scrollbar-thumb:hover {
+  @apply bg-gray-500;
+}
+
+/* Scrollbar styling - Light mode */
+html:not(.dark) ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+html:not(.dark) ::-webkit-scrollbar-track {
+  @apply bg-gray-200;
+}
+
+html:not(.dark) ::-webkit-scrollbar-thumb {
+  @apply bg-gray-400 rounded;
+}
+
+html:not(.dark) ::-webkit-scrollbar-thumb:hover {
   @apply bg-gray-500;
 }
 

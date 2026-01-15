@@ -1,5 +1,5 @@
 import React, { useMemo, useCallback, useState } from 'react';
-import { CreditCard, Tag, Layers, Search, X, CheckCircle, AlertCircle, Wand2 } from 'lucide-react';
+import { CreditCard, Tag, Layers, Search, X, CheckCircle, AlertCircle, Wand2, Trash2 } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 import { renderCard, getCardTypeName } from '../utils/cardRenderer';
 import { getCardsInDeck } from '../utils/ankiParser';
@@ -12,6 +12,7 @@ export const CardList: React.FC = () => {
     const selectCard = useAppStore(state => state.selectCard);
     const analysisCache = useAppStore(state => state.analysisCache);
     const isGeneratedCard = useAppStore(state => state.isGeneratedCard);
+    const isCardMarkedForDeletion = useAppStore(state => state.isCardMarkedForDeletion);
 
     const [renderedCards, setRenderedCards] = React.useState<Map<number, RenderedCard>>(new Map());
     const [isLoading, setIsLoading] = React.useState(false);
@@ -163,18 +164,50 @@ export const CardList: React.FC = () => {
                     const isAnalyzed = analysisCache.has(card.id);
                     const cachedResult = analysisCache.get(card.id);
                     const isGenerated = isGeneratedCard(card.id);
+                    const isMarkedForDeletion = isCardMarkedForDeletion(card.id);
+                    const [hovered, setHovered] = React.useState(false);
+
+                    // Delete/restore handlers
+                    const handleDelete = (e: React.MouseEvent) => {
+                        e.stopPropagation();
+                        markCardForDeletion(card.id);
+                    };
+                    const handleRestore = (e: React.MouseEvent) => {
+                        e.stopPropagation();
+                        unmarkCardForDeletion(card.id);
+                    };
 
                     return (
                         <div
                             key={card.id}
-                            className={`p-2 rounded cursor-pointer transition-colors ${isSelected ? 'bg-blue-600' :
-                                    isGenerated ? 'hover:bg-purple-700/50 bg-purple-900/30 border border-purple-700/50' :
-                                        'hover:bg-gray-700 bg-gray-800'
+                            className={`relative p-2 rounded cursor-pointer transition-colors ${isMarkedForDeletion
+                                    ? (isSelected ? 'bg-red-800' : 'hover:bg-red-900/50 bg-red-900/30 border border-red-700/50 opacity-60')
+                                    : isSelected ? 'bg-blue-600' :
+                                        isGenerated ? 'hover:bg-purple-700/50 bg-purple-900/30 border border-purple-700/50' :
+                                            'hover:bg-gray-700 bg-gray-800'
                                 }`}
                             onClick={() => handleSelectCard(card)}
+                            onMouseEnter={() => setHovered(true)}
+                            onMouseLeave={() => setHovered(false)}
                         >
+                            {/* Trash/Restore icon on hover */}
+                            {hovered && !isGenerated && (
+                                <button
+                                    className="absolute right-2 top-2 z-10 p-1 rounded hover:bg-gray-700"
+                                    title={isMarkedForDeletion ? 'Restore card' : 'Delete card'}
+                                    onClick={isMarkedForDeletion ? handleRestore : handleDelete}
+                                >
+                                    {isMarkedForDeletion ? (
+                                        <Undo2 className="w-4 h-4 text-green-400" />
+                                    ) : (
+                                        <Trash2 className="w-4 h-4 text-red-400" />
+                                    )}
+                                </button>
+                            )}
                             <div className="flex items-start gap-2">
-                                {isGenerated ? (
+                                {isMarkedForDeletion ? (
+                                    <Trash2 className="w-4 h-4 mt-0.5 flex-shrink-0 text-red-400" />
+                                ) : isGenerated ? (
                                     <Wand2 className="w-4 h-4 mt-0.5 flex-shrink-0 text-purple-400" />
                                 ) : (
                                     <CreditCard className="w-4 h-4 mt-0.5 flex-shrink-0 text-gray-400" />
@@ -182,15 +215,20 @@ export const CardList: React.FC = () => {
                                 <div className="flex-1 min-w-0">
                                     <div className="flex items-center gap-2">
                                         <div
-                                            className={`text-sm truncate flex-1 ${isGenerated ? 'text-purple-200' : ''}`}
+                                            className={`text-sm truncate flex-1 ${isMarkedForDeletion ? 'text-red-300 line-through' :
+                                                    isGenerated ? 'text-purple-200' : ''
+                                                }`}
                                             dangerouslySetInnerHTML={{
                                                 __html: rendered?.front?.slice(0, 100) || 'Loading...'
                                             }}
                                         />
-                                        {isGenerated && (
+                                        {isMarkedForDeletion && (
+                                            <span className="text-xs text-red-400 flex-shrink-0">Delete</span>
+                                        )}
+                                        {isGenerated && !isMarkedForDeletion && (
                                             <span className="text-xs text-purple-400 flex-shrink-0">New</span>
                                         )}
-                                        {isAnalyzed && cachedResult && (
+                                        {isAnalyzed && cachedResult && !isMarkedForDeletion && (
                                             (cachedResult.error || cachedResult.feedback.overallScore === 0) ? (
                                                 <div
                                                     className="flex items-center gap-1 flex-shrink-0 text-red-400"
@@ -201,7 +239,7 @@ export const CardList: React.FC = () => {
                                             ) : (
                                                 <div
                                                     className={`flex items-center gap-1 flex-shrink-0 ${cachedResult.feedback.overallScore >= 7 ? 'text-green-400' :
-                                                            cachedResult.feedback.overallScore >= 4 ? 'text-yellow-400' : 'text-red-400'
+                                                        cachedResult.feedback.overallScore >= 4 ? 'text-yellow-400' : 'text-red-400'
                                                         }`}
                                                     title={`Analyzed: ${cachedResult.feedback.overallScore}/10`}
                                                 >
@@ -212,7 +250,9 @@ export const CardList: React.FC = () => {
                                         )}
                                     </div>
                                     <div className="flex items-center gap-2 mt-1 text-xs text-gray-400">
-                                        <span className={`px-1.5 py-0.5 rounded ${isGenerated ? 'bg-purple-800/50 text-purple-300' : 'bg-gray-700'}`}>
+                                        <span className={`px-1.5 py-0.5 rounded ${isMarkedForDeletion ? 'bg-red-800/50 text-red-300' :
+                                                isGenerated ? 'bg-purple-800/50 text-purple-300' : 'bg-gray-700'
+                                            }`}>
                                             {getCardTypeName(card.type)}
                                         </span>
                                         {rendered?.tags && rendered.tags.length > 0 && (

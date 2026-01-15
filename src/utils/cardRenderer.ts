@@ -1,4 +1,22 @@
-import type { AnkiCollection, AnkiCard, RenderedCard, CardType } from '../types';
+import type { AnkiCollection, AnkiCard, RenderedCard, CardType, ReviewLogEntry } from '../types';
+
+// Helper to compute review stats from history
+function computeReviewStats(reviewHistory: ReviewLogEntry[]): {
+  firstReview: number | null;
+  lastReview: number | null;
+  totalTime: number;
+} {
+  if (reviewHistory.length === 0) {
+    return { firstReview: null, lastReview: null, totalTime: 0 };
+  }
+  
+  // Reviews are sorted by ID (timestamp) ascending
+  const firstReview = reviewHistory[0].id;
+  const lastReview = reviewHistory[reviewHistory.length - 1].id;
+  const totalTime = reviewHistory.reduce((sum, r) => sum + r.time, 0);
+  
+  return { firstReview, lastReview, totalTime };
+}
 
 // Replace Anki field references like {{FieldName}} with actual values
 function replaceFields(template: string, fields: { name: string; value: string }[]): string {
@@ -133,6 +151,10 @@ export async function renderCard(
   collection: AnkiCollection,
   card: AnkiCard
 ): Promise<RenderedCard> {
+  // Get review history for this card
+  const reviewHistory = collection.revlog.get(card.id) || [];
+  const { firstReview, lastReview, totalTime } = computeReviewStats(reviewHistory);
+  
   const note = collection.notes.get(card.noteId);
   if (!note) {
     // Return a placeholder for missing notes
@@ -147,7 +169,18 @@ export async function renderCard(
       back: '<span class="warning">Note data is missing</span>',
       fields: [],
       tags: [],
-      css: ''
+      css: '',
+      queue: card.queue,
+      due: card.due,
+      interval: card.interval,
+      factor: card.factor,
+      reps: card.reps,
+      lapses: card.lapses,
+      cardCreated: card.id,
+      firstReview,
+      lastReview,
+      totalTime,
+      reviewHistory
     };
   }
   
@@ -180,7 +213,18 @@ export async function renderCard(
         back: await processMediaReferences(back + (extra ? `<hr><div class="extra">${extra}</div>` : ''), collection.media),
         fields: note.fields.map((value, i) => ({ name: `Field ${i + 1}`, value })),
         tags: note.tags,
-        css: ''
+        css: '',
+        queue: card.queue,
+        due: card.due,
+        interval: card.interval,
+        factor: card.factor,
+        reps: card.reps,
+        lapses: card.lapses,
+        cardCreated: card.id,
+        firstReview,
+        lastReview,
+        totalTime,
+        reviewHistory
       };
     } else {
       // Render as basic card - first field is front, second is back
@@ -198,7 +242,18 @@ export async function renderCard(
         back: await processMediaReferences(back, collection.media),
         fields: note.fields.map((value, i) => ({ name: `Field ${i + 1}`, value })),
         tags: note.tags,
-        css: ''
+        css: '',
+        queue: card.queue,
+        due: card.due,
+        interval: card.interval,
+        factor: card.factor,
+        reps: card.reps,
+        lapses: card.lapses,
+        cardCreated: card.id,
+        firstReview,
+        lastReview,
+        totalTime,
+        reviewHistory
       };
     }
   }
@@ -252,7 +307,18 @@ export async function renderCard(
     back,
     fields,
     tags: note.tags,
-    css: model.css
+    css: model.css,
+    queue: card.queue,
+    due: card.due,
+    interval: card.interval,
+    factor: card.factor,
+    reps: card.reps,
+    lapses: card.lapses,
+    cardCreated: card.id,
+    firstReview,
+    lastReview,
+    totalTime,
+    reviewHistory
   };
 }
 

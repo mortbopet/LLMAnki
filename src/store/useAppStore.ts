@@ -1,3 +1,18 @@
+  unmarkDeckSuggestedCardAdded: (deckId: number, cardIndex: number) => void;
+      unmarkDeckSuggestedCardAdded: (deckId, cardIndex) => {
+        const cache = new Map(get().deckAnalysisCache);
+        const existing = cache.get(deckId);
+        if (existing) {
+          const addedIndices = existing.addedSuggestedCardIndices || [];
+          if (addedIndices.includes(cardIndex)) {
+            cache.set(deckId, {
+              ...existing,
+              addedSuggestedCardIndices: addedIndices.filter(i => i !== cardIndex)
+            });
+            set({ deckAnalysisCache: cache });
+          }
+        }
+      },
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { 
@@ -12,6 +27,13 @@ import type {
   AnkiNote
 } from '../types';
 import { getDefaultConfig } from '../utils/llmService';
+import { 
+  cacheAnalysisResult, 
+  loadValidCachedResults,
+  getDeckState,
+  saveDeckState,
+  type DeckState
+} from '../utils/analysisCache';
 
 interface AppState {
   // Collection state
@@ -22,6 +44,12 @@ interface AppState {
   
   // Track generated/AI-added cards
   generatedCardIds: Set<number>;
+  
+  // Track cards marked for deletion (soft delete)
+  markedForDeletion: Set<number>;
+  
+  // Track edited card fields - Map<noteId, fields>
+  editedCards: Map<number, { name: string; value: string }[]>;
   
   // Undo/Redo stacks
   undoStack: UndoableAction[];
@@ -63,9 +91,11 @@ interface AppState {
   setAnalysisResult: (result: LLMAnalysisResult | null) => void;
   setIsAnalyzing: (isAnalyzing: boolean) => void;
   setAnalysisError: (error: string | null) => void;
-  cacheAnalysis: (cardId: number, result: LLMAnalysisResult) => void;
+  cacheAnalysis: (cardId: number, result: LLMAnalysisResult, fields?: { name: string; value: string }[]) => void;
   getCachedAnalysis: (cardId: number) => LLMAnalysisResult | undefined;
+  loadCachedAnalysesForDeck: (cards: Array<{ id: number; fields: { name: string; value: string }[] }>) => number;
   cacheDeckAnalysis: (deckId: number, result: DeckAnalysisResult) => void;
+  markDeckSuggestedCardAdded: (deckId: number, cardIndex: number) => void;
   setAnalyzingDeckId: (deckId: number | null) => void;
   setDeckAnalysisProgress: (progress: { current: number; total: number } | null) => void;
   cancelDeckAnalysis: () => void;
@@ -77,13 +107,23 @@ interface AppState {
   setEditingSuggestionIndex: (index: number | null) => void;
   
   // Card operations with undo/redo
-  addCardToDeck: (suggestedCard: SuggestedCard, deckId: number) => number | null;
+  addCardToDeck: (suggestedCard: SuggestedCard, deckId: number, sourceCardId?: number) => number | null;
   deleteCard: (cardId: number) => void;
+  markCardForDeletion: (cardId: number) => void;
+  unmarkCardForDeletion: (cardId: number) => void;
+  isCardMarkedForDeletion: (cardId: number) => boolean;
+  updateCardFields: (noteId: number, fields: { name: string; value: string }[]) => void;
+  getEditedFields: (noteId: number) => { name: string; value: string }[] | undefined;
+  isCardEdited: (noteId: number) => boolean;
   undo: () => void;
   redo: () => void;
   canUndo: () => boolean;
   canRedo: () => boolean;
   isGeneratedCard: (cardId: number) => boolean;
+  
+  // State persistence
+  loadDeckState: () => void;
+  persistDeckState: () => void;
   
   setLLMConfig: (config: Partial<LLMConfig>) => void;
   setShowSettings: (show: boolean) => void;
@@ -99,6 +139,8 @@ export const useAppStore = create<AppState>()(
       isLoadingCollection: false,
       loadingProgress: null,
       generatedCardIds: new Set(),
+      markedForDeletion: new Set(),
+      editedCards: new Map(),
       undoStack: [],
       redoStack: [],
       selectedDeckId: null,
@@ -131,6 +173,8 @@ export const useAppStore = create<AppState>()(
         analysisCache: new Map(),
         deckAnalysisCache: new Map(),
         generatedCardIds: new Set(),
+        markedForDeletion: new Set(),
+        editedCards: new Map(),
         undoStack: [],
         redoStack: [],
         suggestedCards: []
@@ -171,20 +215,58 @@ export const useAppStore = create<AppState>()(
       
       setAnalysisError: (error) => set({ analysisError: error }),
       
-      cacheAnalysis: (cardId, result) => {
+      cacheAnalysis: (cardId, result, fields) => {
         const cache = new Map(get().analysisCache);
         cache.set(cardId, result);
         set({ analysisCache: cache });
+        
+        // Also persist to localStorage if we have the deck file name and fields
+        const fileName = get().fileName;
+        if (fileName && fields) {
+          cacheAnalysisResult(fileName, cardId, fields, result);
+        }
       },
       
       getCachedAnalysis: (cardId) => {
         return get().analysisCache.get(cardId);
       },
       
+      loadCachedAnalysesForDeck: (cards) => {
+        const fileName = get().fileName;
+        if (!fileName || cards.length === 0) return 0;
+        
+        const validResults = loadValidCachedResults(fileName, cards);
+        if (validResults.size === 0) return 0;
+        
+        // Merge with existing cache
+        const cache = new Map(get().analysisCache);
+        for (const [cardId, result] of validResults) {
+          cache.set(cardId, result);
+        }
+        set({ analysisCache: cache });
+        
+        return validResults.size;
+      },
+      
       cacheDeckAnalysis: (deckId, result) => {
         const cache = new Map(get().deckAnalysisCache);
         cache.set(deckId, result);
         set({ deckAnalysisCache: cache });
+      },
+      
+      markDeckSuggestedCardAdded: (deckId, cardIndex) => {
+        const cache = new Map(get().deckAnalysisCache);
+        const existing = cache.get(deckId);
+        if (existing) {
+          const addedIndices = existing.addedSuggestedCardIndices || [];
+          if (!addedIndices.includes(cardIndex)) {
+            cache.set(deckId, {
+              ...existing,
+              addedSuggestedCardIndices: [...addedIndices, cardIndex]
+            });
+            set({ deckAnalysisCache: cache });
+          }
+        }
       },
       
       setAnalyzingDeckId: (deckId) => set({ analyzingDeckId: deckId }),
@@ -213,9 +295,14 @@ export const useAppStore = create<AppState>()(
       setEditingSuggestionIndex: (index) => set({ editingSuggestionIndex: index }),
       
       // Add a card to the deck (immediately, with undo support)
-      addCardToDeck: (suggestedCard, deckId) => {
+      addCardToDeck: (suggestedCard, deckId, sourceCardId) => {
         const collection = get().collection;
+        const llmConfig = get().llmConfig;
         if (!collection) return null;
+        
+        // Get source card for potential metadata inheritance
+        const sourceCard = sourceCardId ? collection.cards.get(sourceCardId) : undefined;
+        const shouldInheritMetadata = llmConfig.inheritCardMetadata && sourceCard;
         
         // Generate unique IDs
         const now = Date.now();
@@ -256,12 +343,13 @@ export const useAppStore = create<AppState>()(
           deckId,
           ordinal: 0,
           type: suggestedCard.type,
-          queue: 0,
-          due: 0,
-          interval: 0,
-          factor: 2500,
-          reps: 0,
-          lapses: 0
+          // Inherit scheduling metadata if enabled, otherwise start fresh
+          queue: shouldInheritMetadata ? sourceCard.queue : 0,
+          due: shouldInheritMetadata ? sourceCard.due : 0,
+          interval: shouldInheritMetadata ? sourceCard.interval : 0,
+          factor: shouldInheritMetadata ? sourceCard.factor : 2500,
+          reps: shouldInheritMetadata ? sourceCard.reps : 0,
+          lapses: shouldInheritMetadata ? sourceCard.lapses : 0
         };
         
         // Update collection
@@ -291,6 +379,9 @@ export const useAppStore = create<AppState>()(
           undoStack: [...get().undoStack, undoAction],
           redoStack: [] // Clear redo stack on new action
         });
+        
+        // Persist state after adding card
+        get().persistDeckState();
         
         return cardId;
       },
@@ -468,6 +559,125 @@ export const useAppStore = create<AppState>()(
       canRedo: () => get().redoStack.length > 0,
       isGeneratedCard: (cardId) => get().generatedCardIds.has(cardId),
       
+      // Mark a card for deletion (soft delete - visual only until export)
+      markCardForDeletion: (cardId) => {
+        const marked = new Set(get().markedForDeletion);
+        marked.add(cardId);
+        set({ markedForDeletion: marked });
+        // Persist state after marking
+        get().persistDeckState();
+      },
+      
+      // Unmark a card from deletion
+      unmarkCardForDeletion: (cardId) => {
+        const marked = new Set(get().markedForDeletion);
+        marked.delete(cardId);
+        set({ markedForDeletion: marked });
+        // Persist state after unmarking
+        get().persistDeckState();
+      },
+      
+      // Check if a card is marked for deletion
+      isCardMarkedForDeletion: (cardId) => get().markedForDeletion.has(cardId),
+      
+      // Update card fields (for editing)
+      updateCardFields: (noteId, fields) => {
+        const editedCards = new Map(get().editedCards);
+        editedCards.set(noteId, fields);
+        set({ editedCards });
+        // Persist state after editing
+        get().persistDeckState();
+      },
+      
+      // Get edited fields for a note
+      getEditedFields: (noteId) => get().editedCards.get(noteId),
+      
+      // Check if a card has been edited
+      isCardEdited: (noteId) => get().editedCards.has(noteId),
+      
+      // Load deck state from localStorage (generated cards, marked for deletion, edited cards)
+      loadDeckState: () => {
+        const fileName = get().fileName;
+        const collection = get().collection;
+        if (!fileName || !collection) return;
+        
+        const savedState = getDeckState(fileName);
+        if (!savedState) return;
+        
+        // Restore markedForDeletion
+        const markedForDeletion = new Set(savedState.markedForDeletion);
+        
+        // Restore edited cards
+        const editedCards = new Map<number, { name: string; value: string }[]>();
+        if (savedState.editedCards) {
+          for (const [noteIdStr, fields] of Object.entries(savedState.editedCards)) {
+            editedCards.set(Number(noteIdStr), fields);
+          }
+        }
+        
+        // Restore generated cards - need to add them back to the collection
+        const newCards = new Map(collection.cards);
+        const newNotes = new Map(collection.notes);
+        
+        // Always restore generatedCardIds from saved state
+        // This ensures styling is applied even if cards already exist in collection
+        const generatedCardIds = new Set(savedState.generatedCardIds);
+        
+        for (const { card, note } of savedState.generatedCards) {
+          // Only add to collection if the card doesn't already exist
+          if (!newCards.has(card.id)) {
+            newCards.set(card.id, card);
+            newNotes.set(note.id, note);
+          }
+        }
+        
+        set({
+          collection: { ...collection, cards: newCards, notes: newNotes },
+          generatedCardIds,
+          markedForDeletion,
+          editedCards
+        });
+      },
+      
+      // Persist deck state to localStorage
+      persistDeckState: () => {
+        const fileName = get().fileName;
+        const collection = get().collection;
+        const generatedCardIds = get().generatedCardIds;
+        const markedForDeletion = get().markedForDeletion;
+        const editedCards = get().editedCards;
+        
+        if (!fileName || !collection) return;
+        
+        // Build the generated cards array
+        const generatedCards: Array<{ card: AnkiCard; note: AnkiNote }> = [];
+        for (const cardId of generatedCardIds) {
+          const card = collection.cards.get(cardId);
+          if (card) {
+            const note = collection.notes.get(card.noteId);
+            if (note) {
+              generatedCards.push({ card, note });
+            }
+          }
+        }
+        
+        // Convert editedCards Map to Record for serialization
+        const editedCardsRecord: Record<number, { name: string; value: string }[]> = {};
+        editedCards.forEach((fields, noteId) => {
+          editedCardsRecord[noteId] = fields;
+        });
+        
+        const state: DeckState = {
+          generatedCardIds: Array.from(generatedCardIds),
+          markedForDeletion: Array.from(markedForDeletion),
+          generatedCards,
+          editedCards: editedCardsRecord,
+          lastUpdated: Date.now()
+        };
+        
+        saveDeckState(fileName, state);
+      },
+      
       setLLMConfig: (config) => set({ 
         llmConfig: { ...get().llmConfig, ...config } 
       }),
@@ -486,7 +696,24 @@ export const useAppStore = create<AppState>()(
       name: 'llmanki-storage',
       partialize: (state) => ({ 
         llmConfig: state.llmConfig 
-      })
+      }),
+      // Merge persisted state with defaults to ensure new config fields are present
+      merge: (persistedState, currentState) => {
+        const persisted = persistedState as Partial<AppState>;
+        const persistedConfig = (persisted.llmConfig || {}) as Partial<LLMConfig>;
+        return {
+          ...currentState,
+          llmConfig: {
+            ...currentState.llmConfig,
+            ...persistedConfig,
+            // Deep merge apiKeys to preserve API keys from both default and persisted
+            apiKeys: {
+              ...currentState.llmConfig.apiKeys,
+              ...(persistedConfig.apiKeys || {})
+            }
+          }
+        };
+      }
     }
   )
 );

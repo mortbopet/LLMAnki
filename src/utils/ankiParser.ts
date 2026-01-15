@@ -1,7 +1,7 @@
 import JSZip from 'jszip';
 import { decompress } from 'fzstd';
 import { decode as msgpackDecode } from '@msgpack/msgpack';
-import type { AnkiCollection, AnkiDeck, AnkiModel, AnkiNote, AnkiCard, CardType, AnkiField, AnkiTemplate } from '../types';
+import type { AnkiCollection, AnkiDeck, AnkiModel, AnkiNote, AnkiCard, CardType, AnkiField, AnkiTemplate, ReviewLogEntry } from '../types';
 
 // Get MIME type from filename extension
 function getMimeType(filename: string): string {
@@ -551,6 +551,39 @@ export async function parseApkgFile(file: File, onProgress?: (progress: string) 
     }
   }
   
+  // Parse review log (revlog table)
+  onProgress?.('Parsing review history...');
+  const revlog = new Map<number, ReviewLogEntry[]>();
+  
+  try {
+    const revlogResult = db.exec('SELECT id, cid, ease, ivl, lastIvl, factor, time, type FROM revlog ORDER BY id ASC');
+    
+    if (revlogResult.length > 0) {
+      for (const row of revlogResult[0].values) {
+        const reviewId = row[0] as number;
+        const cardId = row[1] as number;
+        
+        const entry: ReviewLogEntry = {
+          id: reviewId,
+          cardId: cardId,
+          ease: row[2] as number,
+          interval: row[3] as number,
+          lastInterval: row[4] as number,
+          factor: row[5] as number,
+          time: row[6] as number,
+          type: row[7] as number
+        };
+        
+        if (!revlog.has(cardId)) {
+          revlog.set(cardId, []);
+        }
+        revlog.get(cardId)!.push(entry);
+      }
+    }
+  } catch (e) {
+    console.warn('Could not parse revlog table:', e);
+  }
+  
   onProgress?.('Finalizing...');
   db.close();
   
@@ -559,12 +592,13 @@ export async function parseApkgFile(file: File, onProgress?: (progress: string) 
     models,
     notes,
     cards,
+    revlog,
     media,
     deckTree
   };
 }
 
-export function exportCollection(collection: AnkiCollection): Promise<Blob> {
+export function exportCollection(collection: AnkiCollection, excludeCardIds?: Set<number>): Promise<Blob> {
   // This would rebuild the .apkg file
   // For now, we'll implement a simplified version
   return new Promise(async (resolve) => {
@@ -582,7 +616,11 @@ export function exportCollection(collection: AnkiCollection): Promise<Blob> {
     
     // For a full implementation, we would need to rebuild the SQLite database
     // This is complex and would require sql.js to create/modify the database
+    // Cards in excludeCardIds should be filtered out when rebuilding
     // For now, we'll just export the structure
+    
+    // TODO: When rebuilding the SQLite database, filter out cards/notes using excludeCardIds
+    // const cardsToExport = Array.from(collection.cards.values()).filter(c => !excludeCardIds?.has(c.id));
     
     const blob = await zip.generateAsync({ type: 'blob' });
     resolve(blob);

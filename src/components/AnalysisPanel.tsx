@@ -8,10 +8,12 @@ import {
     ThumbsUp,
     ThumbsDown,
     Trash2,
-    Plus
+    Plus,
+    Undo2
 } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 import { CardCarousel } from './CardCarousel';
+import { SuggestedCardsList } from './SuggestedCardsList';
 import { CardEditor } from './CardEditor';
 import type { LLMAnalysisResult, SuggestedCard } from '../types';
 
@@ -39,12 +41,18 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ result }) => {
     const editingSuggestionIndex = useAppStore(state => state.editingSuggestionIndex);
     const setEditingSuggestionIndex = useAppStore(state => state.setEditingSuggestionIndex);
     const addCardToDeck = useAppStore(state => state.addCardToDeck);
-    const deleteCard = useAppStore(state => state.deleteCard);
+    const markCardForDeletion = useAppStore(state => state.markCardForDeletion);
+    const unmarkCardForDeletion = useAppStore(state => state.unmarkCardForDeletion);
+    const isCardMarkedForDeletion = useAppStore(state => state.isCardMarkedForDeletion);
     const selectedCard = useAppStore(state => state.selectedCard);
     const selectedDeckId = useAppStore(state => state.selectedDeckId);
+    const llmConfig = useAppStore(state => state.llmConfig);
 
     // Track carousel position to persist across edit/save cycles
     const [carouselIndex, setCarouselIndex] = useState(0);
+
+    // Get layout preference (default to carousel for backwards compatibility)
+    const suggestedCardsLayout = llmConfig.suggestedCardsLayout || 'carousel';
 
     const handleEditCard = (index: number) => {
         setCarouselIndex(index); // Remember where we were
@@ -58,15 +66,23 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ result }) => {
 
     const handleAddCard = (card: SuggestedCard) => {
         if (selectedDeckId !== null) {
-            addCardToDeck(card, selectedDeckId);
+            // Pass the selected card ID for potential metadata inheritance
+            addCardToDeck(card, selectedDeckId, selectedCard?.id);
         }
     };
 
-    const handleDeleteOriginal = () => {
+    const handleToggleDeleteMark = () => {
         if (selectedCard) {
-            deleteCard(selectedCard.id);
+            if (isCardMarkedForDeletion(selectedCard.id)) {
+                unmarkCardForDeletion(selectedCard.id);
+            } else {
+                markCardForDeletion(selectedCard.id);
+            }
         }
     };
+
+    // Check if the current card is marked for deletion
+    const isCurrentCardMarked = selectedCard ? isCardMarkedForDeletion(selectedCard.id) : false;
 
     // Use local suggestedCards state which can be edited
     const displayCards = suggestedCardsState.length > 0 ? suggestedCardsState : suggestedCards;
@@ -82,7 +98,7 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ result }) => {
                     </h3>
                     <div className="flex items-center gap-2">
                         <span className={`text-2xl font-bold ${feedback.overallScore >= 7 ? 'text-green-500' :
-                                feedback.overallScore >= 4 ? 'text-yellow-500' : 'text-red-500'
+                            feedback.overallScore >= 4 ? 'text-yellow-500' : 'text-red-500'
                             }`}>
                             {feedback.overallScore}/10
                         </span>
@@ -151,24 +167,54 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ result }) => {
             )}
 
             {/* Delete Recommendation */}
-            {deleteOriginal && (
-                <div className="bg-red-900/30 border border-red-700 rounded-lg p-4">
-                    <h3 className="font-semibold flex items-center gap-2 mb-2 text-red-400">
-                        <Trash2 className="w-5 h-5" />
-                        Deletion Recommended
+            {(deleteOriginal || isCurrentCardMarked) && (
+                <div className={`rounded-lg p-4 ${isCurrentCardMarked
+                    ? 'bg-gray-700 border border-gray-600'
+                    : 'bg-red-900/30 border border-red-700'}`}>
+                    <h3 className={`font-semibold flex items-center gap-2 mb-2 ${isCurrentCardMarked ? 'text-gray-300' : 'text-red-400'}`}>
+                        {isCurrentCardMarked ? (
+                            <>
+                                <Trash2 className="w-5 h-5" />
+                                Card Marked for Deletion
+                            </>
+                        ) : (
+                            <>
+                                <Trash2 className="w-5 h-5" />
+                                Deletion Recommended
+                            </>
+                        )}
                     </h3>
-                    <p className="text-sm text-gray-300 mb-3">{deleteReason}</p>
+                    {!isCurrentCardMarked && deleteReason && (
+                        <p className="text-sm text-gray-300 mb-3">{deleteReason}</p>
+                    )}
+                    {isCurrentCardMarked ? (
+                        <p className="text-sm text-gray-400 mb-3">
+                            This card will be excluded when you export the deck. You can still add suggested replacement cards.
+                        </p>
+                    ) : null}
                     <button
-                        onClick={handleDeleteOriginal}
-                        className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg transition-colors"
+                        onClick={handleToggleDeleteMark}
+                        className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${isCurrentCardMarked
+                                ? 'bg-gray-600 hover:bg-gray-500'
+                                : 'bg-red-600 hover:bg-red-700'
+                            }`}
                     >
-                        <Trash2 className="w-4 h-4" />
-                        Mark Original for Deletion
+                        {isCurrentCardMarked ? (
+                            <>
+                                <Undo2 className="w-4 h-4" />
+                                Unmark for Deletion
+                            </>
+                        ) : (
+                            <>
+                                <Trash2 className="w-4 h-4" />
+                                Mark for Deletion
+                            </>
+                        )}
                     </button>
                 </div>
             )}
 
-            {/* Suggested Cards - Using Swiper Carousel */}
+            {/* Suggested Cards - Carousel or List based on settings */}
             {displayCards.length > 0 && (
                 <div className="space-y-4">
                     <h3 className="font-semibold flex items-center gap-2">
@@ -182,6 +228,14 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ result }) => {
                             onChange={(updated) => updateSuggestedCard(editingSuggestionIndex, updated)}
                             onCancel={() => setEditingSuggestionIndex(null)}
                             onSave={() => handleSaveEdit(editingSuggestionIndex, displayCards[editingSuggestionIndex])}
+                        />
+                    ) : suggestedCardsLayout === 'list' ? (
+                        <SuggestedCardsList
+                            cards={displayCards}
+                            onAddCard={(card) => handleAddCard(card)}
+                            onEditCard={(index) => handleEditCard(index)}
+                            onRemoveCard={(index) => removeSuggestedCard(index)}
+                            titlePrefix="Suggested Card"
                         />
                     ) : (
                         <CardCarousel

@@ -15,6 +15,18 @@ export interface AnkiCard {
   lapses: number;
 }
 
+// Review log entry from revlog table
+export interface ReviewLogEntry {
+  id: number; // Timestamp in milliseconds when review was done
+  cardId: number;
+  ease: number; // 1=Again, 2=Hard, 3=Good, 4=Easy, 0=Manual
+  interval: number; // New interval after review (negative = seconds, positive = days)
+  lastInterval: number; // Interval before review
+  factor: number; // Ease factor after review (permille, e.g., 2500 = 250%)
+  time: number; // Time spent on review in milliseconds
+  type: number; // 0=Learn, 1=Review, 2=Relearn, 3=Filtered, 4=Manual
+}
+
 export interface AnkiNote {
   id: number;
   modelId: number;
@@ -59,6 +71,7 @@ export interface AnkiCollection {
   models: Map<number, AnkiModel>;
   notes: Map<number, AnkiNote>;
   cards: Map<number, AnkiCard>;
+  revlog: Map<number, ReviewLogEntry[]>; // Card ID -> review entries
   media: Map<string, Blob>;
   deckTree: AnkiDeck[];
 }
@@ -76,6 +89,19 @@ export interface RenderedCard {
   fields: { name: string; value: string }[];
   tags: string[];
   css: string;
+  // Scheduling metadata
+  queue: number;
+  due: number;
+  interval: number;
+  factor: number;
+  reps: number;
+  lapses: number;
+  // Extended scheduling info
+  cardCreated: number; // Timestamp when card was created (from card ID)
+  firstReview: number | null; // Timestamp of first review
+  lastReview: number | null; // Timestamp of most recent review
+  totalTime: number; // Total time spent reviewing in milliseconds
+  reviewHistory: ReviewLogEntry[]; // Full review history
 }
 
 // LLM Types
@@ -96,6 +122,10 @@ export interface LLMConfig {
   sendImages: boolean;
   maxDeckAnalysisCards: number;
   concurrentDeckAnalysis: boolean;
+  requestDelayMs: number; // Delay between requests during deck analysis (for rate limiting)
+  suggestedCardsLayout: 'carousel' | 'list'; // How to display suggested cards
+  inheritCardMetadata: boolean; // Whether new cards should inherit scheduling metadata from original card
+  darkMode: boolean; // Dark mode theme
 }
 
 export interface CardFeedback {
@@ -150,6 +180,16 @@ export interface AppSettings {
   showAdvancedOptions: boolean;
 }
 
+// Knowledge coverage analysis for a deck
+export interface KnowledgeCoverage {
+  overallCoverage: 'excellent' | 'good' | 'fair' | 'poor';
+  coverageScore: number; // 1-10
+  summary: string; // Overall assessment of knowledge coverage
+  coveredTopics: string[]; // Topics well covered by the deck
+  gaps: { topic: string; importance: 'high' | 'medium' | 'low'; description: string }[];
+  recommendations: string[]; // Specific recommendations to improve coverage
+}
+
 // Deck-level analysis
 export interface DeckAnalysisResult {
   deckId: number;
@@ -158,10 +198,10 @@ export interface DeckAnalysisResult {
   analyzedCards: number;
   averageScore: number;
   scoreDistribution: { score: number; count: number }[];
-  commonIssues: { issue: string; count: number }[];
-  classifiedIssues: { category: string; issues: { issue: string; count: number }[] }[];
+  knowledgeCoverage: KnowledgeCoverage | null;
   deckSummary: string;
   suggestedNewCards: SuggestedCard[];
+  addedSuggestedCardIndices: number[]; // Track which suggested cards have been added
   totalSuggestedFromCards: number;
   error?: string;
 }

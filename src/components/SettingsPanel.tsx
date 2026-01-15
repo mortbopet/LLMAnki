@@ -1,7 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Settings, X, Save, RotateCcw, Key, Server, MessageSquare, Info, ExternalLink, Image, Layers, Zap, RefreshCw, Loader2 } from 'lucide-react';
+import { Settings, X, RotateCcw, Key, Server, MessageSquare, Info, ExternalLink, Image, Layers, Zap, RefreshCw, Loader2, Clock, LayoutGrid, Cpu, SlidersHorizontal, Monitor, History, Sun, Moon, Database, Trash2 } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 import { LLM_PROVIDERS, DEFAULT_SYSTEM_PROMPT, PROVIDER_INFO, SYSTEM_PROMPT_VERSION, fetchProviderModels, clearModelCache, type ModelInfo } from '../utils/llmService';
+import { getCacheIndex, clearDeckCache, clearAllCaches, formatBytes, type DeckCacheInfo } from '../utils/analysisCache';
+import type { LLMConfig } from '../types';
+
+type SettingsTab = 'provider' | 'analysis' | 'display' | 'caching';
 
 export const SettingsPanel: React.FC = () => {
     const showSettings = useAppStore(state => state.showSettings);
@@ -9,17 +13,31 @@ export const SettingsPanel: React.FC = () => {
     const llmConfig = useAppStore(state => state.llmConfig);
     const setLLMConfig = useAppStore(state => state.setLLMConfig);
 
-    const [localConfig, setLocalConfig] = useState(llmConfig);
+    // Helper to update config immediately
+    const updateConfig = useCallback((updates: Partial<LLMConfig>) => {
+        setLLMConfig({ ...llmConfig, ...updates });
+    }, [llmConfig, setLLMConfig]);
     const [showProviderInfo, setShowProviderInfo] = useState(false);
     const [availableModels, setAvailableModels] = useState<ModelInfo[]>([]);
     const [isLoadingModels, setIsLoadingModels] = useState(false);
     const [modelsError, setModelsError] = useState<string | null>(null);
+    const [activeTab, setActiveTab] = useState<SettingsTab>('provider');
+    const [cacheInfo, setCacheInfo] = useState<Record<string, DeckCacheInfo>>({});
+    const [cacheRefreshKey, setCacheRefreshKey] = useState(0);
 
-    const selectedProvider = LLM_PROVIDERS.find(p => p.id === localConfig.providerId);
-    const providerInfo = PROVIDER_INFO[localConfig.providerId];
+    const selectedProvider = LLM_PROVIDERS.find(p => p.id === llmConfig.providerId);
+    const providerInfo = PROVIDER_INFO[llmConfig.providerId];
 
     // Get current API key for the selected provider (with backwards compatibility)
-    const currentApiKey = localConfig.apiKeys?.[localConfig.providerId] || (localConfig as any).apiKey || '';
+    const currentApiKey = llmConfig.apiKeys?.[llmConfig.providerId] || (llmConfig as any).apiKey || '';
+
+    // Load cache info when caching tab is active
+    useEffect(() => {
+        if (activeTab === 'caching') {
+            const index = getCacheIndex();
+            setCacheInfo(index.decks);
+        }
+    }, [activeTab, cacheRefreshKey]);
 
     // Fetch models when provider or API key changes
     const fetchModels = useCallback(async (forceRefresh = false) => {
@@ -29,20 +47,20 @@ export const SettingsPanel: React.FC = () => {
         setModelsError(null);
 
         if (forceRefresh) {
-            clearModelCache(localConfig.providerId);
+            clearModelCache(llmConfig.providerId);
         }
 
         try {
             const models = await fetchProviderModels(
-                localConfig.providerId,
+                llmConfig.providerId,
                 currentApiKey,
                 selectedProvider.baseUrl
             );
             setAvailableModels(models);
 
             // If current model is not in the list, select the first one
-            if (models.length > 0 && !models.find(m => m.id === localConfig.model)) {
-                setLocalConfig(prev => ({ ...prev, model: models[0].id }));
+            if (models.length > 0 && !models.find(m => m.id === llmConfig.model)) {
+                updateConfig({ model: models[0].id });
             }
         } catch (error) {
             setModelsError('Failed to fetch models');
@@ -51,7 +69,7 @@ export const SettingsPanel: React.FC = () => {
         } finally {
             setIsLoadingModels(false);
         }
-    }, [localConfig.providerId, currentApiKey, selectedProvider, localConfig.model]);
+    }, [llmConfig.providerId, llmConfig.model, currentApiKey, selectedProvider, updateConfig]);
 
     // Fetch models when provider changes or API key is entered
     useEffect(() => {
@@ -62,28 +80,21 @@ export const SettingsPanel: React.FC = () => {
             return;
         }
         fetchModels();
-    }, [localConfig.providerId, currentApiKey, fetchModels, selectedProvider]);
+    }, [llmConfig.providerId, currentApiKey, fetchModels, selectedProvider]);
 
     const handleApiKeyChange = (value: string) => {
         // Ensure apiKeys object exists (backwards compatibility)
-        const existingKeys = localConfig.apiKeys || {};
-        setLocalConfig({
-            ...localConfig,
+        const existingKeys = llmConfig.apiKeys || {};
+        updateConfig({
             apiKeys: {
                 ...existingKeys,
-                [localConfig.providerId]: value
+                [llmConfig.providerId]: value
             }
         });
     };
 
-    const handleSave = () => {
-        setLLMConfig(localConfig);
-        setShowSettings(false);
-    };
-
     const handleResetPrompt = () => {
-        setLocalConfig({
-            ...localConfig,
+        updateConfig({
             systemPrompt: DEFAULT_SYSTEM_PROMPT,
             systemPromptVersion: SYSTEM_PROMPT_VERSION
         });
@@ -92,8 +103,8 @@ export const SettingsPanel: React.FC = () => {
     if (!showSettings) return null;
 
     return (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <div className="bg-gray-800 rounded-xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
+        <div className="fixed inset-0 bg-black/50 flex items-start justify-center z-50 p-4 pt-16 overflow-y-auto">
+            <div className="bg-gray-800 rounded-xl w-full max-w-2xl overflow-hidden flex flex-col" style={{ minHeight: '500px' }}>
                 {/* Header */}
                 <div className="px-6 py-4 bg-gray-700 flex items-center justify-between">
                     <h2 className="text-lg font-semibold flex items-center gap-2">
@@ -108,233 +119,455 @@ export const SettingsPanel: React.FC = () => {
                     </button>
                 </div>
 
+                {/* Tabs */}
+                <div className="flex border-b border-gray-600">
+                    <button
+                        onClick={() => setActiveTab('provider')}
+                        className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors ${activeTab === 'provider'
+                                ? 'text-blue-400 border-b-2 border-blue-400 bg-gray-800/50'
+                                : 'text-gray-400 hover:text-gray-300 hover:bg-gray-700/50'
+                            }`}
+                    >
+                        <Cpu className="w-4 h-4" />
+                        LLM Provider
+                    </button>
+                    <button
+                        onClick={() => setActiveTab('analysis')}
+                        className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors ${activeTab === 'analysis'
+                                ? 'text-blue-400 border-b-2 border-blue-400 bg-gray-800/50'
+                                : 'text-gray-400 hover:text-gray-300 hover:bg-gray-700/50'
+                            }`}
+                    >
+                        <SlidersHorizontal className="w-4 h-4" />
+                        Analysis
+                    </button>
+                    <button
+                        onClick={() => setActiveTab('display')}
+                        className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors ${activeTab === 'display'
+                                ? 'text-blue-400 border-b-2 border-blue-400 bg-gray-800/50'
+                                : 'text-gray-400 hover:text-gray-300 hover:bg-gray-700/50'
+                            }`}
+                    >
+                        <Monitor className="w-4 h-4" />
+                        Display
+                    </button>
+                    <button
+                        onClick={() => setActiveTab('caching')}
+                        className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors ${activeTab === 'caching'
+                                ? 'text-blue-400 border-b-2 border-blue-400 bg-gray-800/50'
+                                : 'text-gray-400 hover:text-gray-300 hover:bg-gray-700/50'
+                            }`}
+                    >
+                        <Database className="w-4 h-4" />
+                        Caching
+                    </button>
+                </div>
+
                 {/* Content */}
                 <div className="flex-1 overflow-y-auto p-6 space-y-6">
-                    {/* LLM Provider */}
-                    <div>
-                        <label className="flex items-center gap-2 text-sm font-medium text-gray-300 mb-2">
-                            <Server className="w-4 h-4" />
-                            LLM Provider
-                            <button
-                                onClick={() => setShowProviderInfo(!showProviderInfo)}
-                                className={`p-1 rounded-full transition-colors ${showProviderInfo ? 'bg-blue-600 text-white' : 'hover:bg-gray-600 text-gray-400'}`}
-                                title="Show provider info"
-                            >
-                                <Info className="w-4 h-4" />
-                            </button>
-                        </label>
-                        <select
-                            value={localConfig.providerId}
-                            onChange={(e) => {
-                                const provider = LLM_PROVIDERS.find(p => p.id === e.target.value);
-                                setLocalConfig({
-                                    ...localConfig,
-                                    providerId: e.target.value,
-                                    model: provider?.models[0] || ''
-                                });
-                            }}
-                            className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        >
-                            {LLM_PROVIDERS.map(provider => (
-                                <option key={provider.id} value={provider.id}>
-                                    {provider.name}
-                                </option>
-                            ))}
-                        </select>
-                        <p className="mt-1 text-xs text-gray-400">
-                            {selectedProvider?.requiresApiKey ? 'Requires API key' : 'No API key required (local)'}
-                        </p>
 
-                        {/* Provider Info Panel */}
-                        {showProviderInfo && providerInfo && (
-                            <div className="mt-3 p-4 bg-gray-700 rounded-lg border border-gray-600 space-y-3">
-                                <p className="text-sm text-gray-300">{providerInfo.description}</p>
-
-                                <div className="flex items-center gap-2">
-                                    <span className="text-xs font-medium text-gray-400">Pricing:</span>
-                                    <span className="text-xs text-gray-300">{providerInfo.pricing}</span>
-                                </div>
-
-                                <div>
-                                    <span className="text-xs font-medium text-gray-400 block mb-1">How to get an API key:</span>
-                                    <p className="text-xs text-gray-300 whitespace-pre-line">{providerInfo.apiKeyInstructions}</p>
-                                </div>
-
-                                <a
-                                    href={providerInfo.apiKeyUrl}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 rounded text-sm transition-colors"
+                    {/* Provider Tab */}
+                    {activeTab === 'provider' && (
+                        <>
+                            {/* LLM Provider */}
+                            <div>
+                                <label className="flex items-center gap-2 text-sm font-medium text-gray-300 mb-2">
+                                    <Server className="w-4 h-4" />
+                                    LLM Provider
+                                    <button
+                                        onClick={() => setShowProviderInfo(!showProviderInfo)}
+                                        className={`p-1 rounded-full transition-colors ${showProviderInfo ? 'bg-blue-600 text-white' : 'hover:bg-gray-600 text-gray-400'}`}
+                                        title="Show provider info"
+                                    >
+                                        <Info className="w-4 h-4" />
+                                    </button>
+                                </label>
+                                <select
+                                    value={llmConfig.providerId}
+                                    onChange={(e) => {
+                                        const provider = LLM_PROVIDERS.find(p => p.id === e.target.value);
+                                        updateConfig({
+                                            providerId: e.target.value,
+                                            model: provider?.models[0] || ''
+                                        });
+                                    }}
+                                    className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                                 >
-                                    <ExternalLink className="w-3.5 h-3.5" />
-                                    {selectedProvider?.requiresApiKey ? 'Get API Key' : 'Download Ollama'}
-                                </a>
-                            </div>
-                        )}
-                    </div>
+                                    {LLM_PROVIDERS.map(provider => (
+                                        <option key={provider.id} value={provider.id}>
+                                            {provider.name}
+                                        </option>
+                                    ))}
+                                </select>
+                                <p className="mt-1 text-xs text-gray-400">
+                                    {selectedProvider?.requiresApiKey ? 'Requires API key' : 'No API key required (local)'}
+                                </p>
 
-                    {/* Model */}
-                    <div>
-                        <label className="flex items-center gap-2 text-sm font-medium text-gray-300 mb-2">
-                            Model
-                            <button
-                                onClick={() => fetchModels(true)}
-                                disabled={isLoadingModels}
-                                className="p-1 rounded-full hover:bg-gray-600 text-gray-400 transition-colors disabled:opacity-50"
-                                title="Refresh model list"
-                            >
-                                {isLoadingModels ? (
-                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                ) : (
-                                    <RefreshCw className="w-3.5 h-3.5" />
+                                {/* Provider Info Panel */}
+                                {showProviderInfo && providerInfo && (
+                                    <div className="mt-3 p-4 bg-gray-700 rounded-lg border border-gray-600 space-y-3">
+                                        <p className="text-sm text-gray-300">{providerInfo.description}</p>
+
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-xs font-medium text-gray-400">Pricing:</span>
+                                            <span className="text-xs text-gray-300">{providerInfo.pricing}</span>
+                                        </div>
+
+                                        <div>
+                                            <span className="text-xs font-medium text-gray-400 block mb-1">How to get an API key:</span>
+                                            <p className="text-xs text-gray-300 whitespace-pre-line">{providerInfo.apiKeyInstructions}</p>
+                                        </div>
+
+                                        <a
+                                            href={providerInfo.apiKeyUrl}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 rounded text-sm transition-colors"
+                                        >
+                                            <ExternalLink className="w-3.5 h-3.5" />
+                                            {selectedProvider?.requiresApiKey ? 'Get API Key' : 'Download Ollama'}
+                                        </a>
+                                    </div>
                                 )}
-                            </button>
-                        </label>
-                        <select
-                            value={localConfig.model}
-                            onChange={(e) => setLocalConfig({ ...localConfig, model: e.target.value })}
-                            className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            disabled={isLoadingModels}
-                        >
-                            {availableModels.map(model => (
-                                <option key={model.id} value={model.id}>
-                                    {model.name || model.id}
-                                    {model.contextWindow ? ` (${Math.round(model.contextWindow / 1000)}k ctx)` : ''}
-                                </option>
-                            ))}
-                        </select>
-                        {modelsError && (
-                            <p className="mt-1 text-xs text-red-400">{modelsError}</p>
-                        )}
-                        {availableModels.length > 0 && !modelsError && (
-                            <p className="mt-1 text-xs text-gray-400">
-                                {availableModels.length} models available
-                                {selectedProvider?.requiresApiKey && !currentApiKey && ' (enter API key to see all)'}
-                            </p>
-                        )}
-                    </div>
+                            </div>
 
-                    {/* API Key */}
-                    {selectedProvider?.requiresApiKey && (
-                        <div>
-                            <label className="flex items-center gap-2 text-sm font-medium text-gray-300 mb-2">
-                                <Key className="w-4 h-4" />
-                                API Key for {selectedProvider.name}
-                            </label>
-                            <input
-                                type="text"
-                                value={currentApiKey}
-                                onChange={(e) => handleApiKeyChange(e.target.value)}
-                                placeholder={`Enter your ${selectedProvider.name} API key`}
-                                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            />
-                            <p className="mt-1 text-xs text-gray-400">
-                                API keys are stored per provider. Your key is stored locally and only sent to {selectedProvider.name}.
-                            </p>
-                        </div>
+                            {/* Model */}
+                            <div>
+                                <label className="flex items-center gap-2 text-sm font-medium text-gray-300 mb-2">
+                                    Model
+                                    <button
+                                        onClick={() => fetchModels(true)}
+                                        disabled={isLoadingModels}
+                                        className="p-1 rounded-full hover:bg-gray-600 text-gray-400 transition-colors disabled:opacity-50"
+                                        title="Refresh model list"
+                                    >
+                                        {isLoadingModels ? (
+                                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                        ) : (
+                                            <RefreshCw className="w-3.5 h-3.5" />
+                                        )}
+                                    </button>
+                                </label>
+                                <select
+                                    value={llmConfig.model}
+                                    onChange={(e) => updateConfig({ model: e.target.value })}
+                                    className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    disabled={isLoadingModels}
+                                >
+                                    {availableModels.map(model => (
+                                        <option key={model.id} value={model.id}>
+                                            {model.name || model.id}
+                                            {model.contextWindow ? ` (${Math.round(model.contextWindow / 1000)}k ctx)` : ''}
+                                        </option>
+                                    ))}
+                                </select>
+                                {modelsError && (
+                                    <p className="mt-1 text-xs text-red-400">{modelsError}</p>
+                                )}
+                                {availableModels.length > 0 && !modelsError && (
+                                    <p className="mt-1 text-xs text-gray-400">
+                                        {availableModels.length} models available
+                                        {selectedProvider?.requiresApiKey && !currentApiKey && ' (enter API key to see all)'}
+                                    </p>
+                                )}
+                            </div>
+
+                            {/* API Key */}
+                            {selectedProvider?.requiresApiKey && (
+                                <div>
+                                    <label className="flex items-center gap-2 text-sm font-medium text-gray-300 mb-2">
+                                        <Key className="w-4 h-4" />
+                                        API Key for {selectedProvider.name}
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={currentApiKey}
+                                        onChange={(e) => handleApiKeyChange(e.target.value)}
+                                        placeholder={`Enter your ${selectedProvider.name} API key`}
+                                        className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    />
+                                    <p className="mt-1 text-xs text-gray-400">
+                                        API keys are stored per provider. Your key is stored locally and only sent to {selectedProvider.name}.
+                                    </p>
+                                </div>
+                            )}
+                        </>
                     )}
 
-                    {/* Send Images Toggle */}
-                    <div>
-                        <label className="flex items-center gap-3 cursor-pointer">
-                            <div className="flex items-center gap-2 text-sm font-medium text-gray-300">
-                                <Image className="w-4 h-4" />
-                                Send Images to LLM
+                    {/* Analysis Tab */}
+                    {activeTab === 'analysis' && (
+                        <>
+                            {/* System Prompt */}
+                            <div>
+                                <div className="flex items-center justify-between mb-2">
+                                    <label className="flex items-center gap-2 text-sm font-medium text-gray-300">
+                                        <MessageSquare className="w-4 h-4" />
+                                        System Prompt
+                                    </label>
+                                    <button
+                                        onClick={handleResetPrompt}
+                                        className="flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300"
+                                    >
+                                        <RotateCcw className="w-3 h-3" />
+                                        Reset to Default
+                                    </button>
+                                </div>
+                                <textarea
+                                    value={llmConfig.systemPrompt}
+                                    onChange={(e) => updateConfig({ systemPrompt: e.target.value })}
+                                    rows={10}
+                                    className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
+                                />
+                                <p className="mt-1 text-xs text-gray-400">
+                                    This prompt is sent to the LLM before analyzing each card. Customize it to change the analysis criteria.
+                                </p>
                             </div>
-                            <input
-                                type="checkbox"
-                                checked={localConfig.sendImages}
-                                onChange={(e) => setLocalConfig({ ...localConfig, sendImages: e.target.checked })}
-                                className="rounded border-gray-600 bg-gray-700 text-blue-500 focus:ring-blue-500"
-                            />
-                        </label>
-                        <p className="mt-1 text-xs text-gray-400">
-                            When enabled, images are converted to base64 and sent for visual analysis. When disabled, image tags are preserved but content is not analyzed.
-                        </p>
-                    </div>
 
-                    {/* Concurrent Deck Analysis Toggle */}
-                    <div>
-                        <label className="flex items-center gap-3 cursor-pointer">
-                            <div className="flex items-center gap-2 text-sm font-medium text-gray-300">
-                                <Zap className="w-4 h-4" />
-                                Concurrent Deck Analysis
+                            {/* Send Images Toggle */}
+                            <div>
+                                <label className="flex items-center gap-3 cursor-pointer">
+                                    <div className="flex items-center gap-2 text-sm font-medium text-gray-300">
+                                        <Image className="w-4 h-4" />
+                                        Send Images to LLM
+                                    </div>
+                                    <input
+                                        type="checkbox"
+                                        checked={llmConfig.sendImages}
+                                        onChange={(e) => updateConfig({ sendImages: e.target.checked })}
+                                        className="rounded border-gray-600 bg-gray-700 text-blue-500 focus:ring-blue-500"
+                                    />
+                                </label>
+                                <p className="mt-1 text-xs text-gray-400">
+                                    When enabled, images are converted to base64 and sent for visual analysis. When disabled, image tags are preserved but content is not analyzed.
+                                </p>
                             </div>
-                            <input
-                                type="checkbox"
-                                checked={localConfig.concurrentDeckAnalysis}
-                                onChange={(e) => setLocalConfig({ ...localConfig, concurrentDeckAnalysis: e.target.checked })}
-                                className="rounded border-gray-600 bg-gray-700 text-blue-500 focus:ring-blue-500"
-                            />
-                        </label>
-                        <p className="mt-1 text-xs text-gray-400">
-                            When enabled, multiple cards are analyzed simultaneously (faster but uses more API calls at once). When disabled, cards are analyzed one at a time (slower but more controlled).
-                        </p>
-                    </div>
 
-                    {/* Max Cards for Deck Analysis */}
-                    <div>
-                        <label className="flex items-center gap-2 text-sm font-medium text-gray-300 mb-2">
-                            <Layers className="w-4 h-4" />
-                            Max Cards for Deck Analysis
-                        </label>
-                        <input
-                            type="number"
-                            min={1}
-                            max={500}
-                            value={localConfig.maxDeckAnalysisCards}
-                            onChange={(e) => setLocalConfig({ ...localConfig, maxDeckAnalysisCards: Math.max(1, Math.min(500, parseInt(e.target.value) || 50)) })}
-                            className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        />
-                        <p className="mt-1 text-xs text-gray-400">
-                            Maximum number of cards to analyze when running deck-level analysis (1-500). Higher values provide more comprehensive analysis but cost more API calls.
-                        </p>
-                    </div>
+                            {/* Concurrent Deck Analysis Toggle */}
+                            <div>
+                                <label className="flex items-center gap-3 cursor-pointer">
+                                    <div className="flex items-center gap-2 text-sm font-medium text-gray-300">
+                                        <Zap className="w-4 h-4" />
+                                        Concurrent Deck Analysis
+                                    </div>
+                                    <input
+                                        type="checkbox"
+                                        checked={llmConfig.concurrentDeckAnalysis}
+                                        onChange={(e) => updateConfig({ concurrentDeckAnalysis: e.target.checked })}
+                                        className="rounded border-gray-600 bg-gray-700 text-blue-500 focus:ring-blue-500"
+                                    />
+                                </label>
+                                <p className="mt-1 text-xs text-gray-400">
+                                    When enabled, multiple cards are analyzed simultaneously (faster but uses more API calls at once). When disabled, cards are analyzed one at a time (slower but less likely to be rate limited by the LLM provider).
+                                </p>
+                            </div>
 
-                    {/* System Prompt */}
-                    <div>
-                        <div className="flex items-center justify-between mb-2">
-                            <label className="flex items-center gap-2 text-sm font-medium text-gray-300">
-                                <MessageSquare className="w-4 h-4" />
-                                System Prompt
-                            </label>
-                            <button
-                                onClick={handleResetPrompt}
-                                className="flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300"
-                            >
-                                <RotateCcw className="w-3 h-3" />
-                                Reset to Default
-                            </button>
-                        </div>
-                        <textarea
-                            value={localConfig.systemPrompt}
-                            onChange={(e) => setLocalConfig({ ...localConfig, systemPrompt: e.target.value })}
-                            rows={12}
-                            className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
-                        />
-                        <p className="mt-1 text-xs text-gray-400">
-                            This prompt is sent to the LLM before analyzing each card. Customize it to change the analysis criteria.
-                        </p>
-                    </div>
+                            {/* Max Cards for Deck Analysis */}
+                            <div>
+                                <label className="flex items-center gap-2 text-sm font-medium text-gray-300 mb-2">
+                                    <Layers className="w-4 h-4" />
+                                    Max Cards for Deck Analysis
+                                </label>
+                                <input
+                                    type="number"
+                                    min={1}
+                                    max={500}
+                                    value={llmConfig.maxDeckAnalysisCards}
+                                    onChange={(e) => updateConfig({ maxDeckAnalysisCards: Math.max(1, Math.min(500, parseInt(e.target.value) || 50)) })}
+                                    className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                />
+                                <p className="mt-1 text-xs text-gray-400">
+                                    Maximum number of cards to analyze when running deck-level analysis (1-500). Higher values provide more comprehensive analysis but cost more API calls.
+                                </p>
+                            </div>
+
+                            {/* Request Delay (Rate Limiting) */}
+                            <div>
+                                <label className="flex items-center gap-2 text-sm font-medium text-gray-300 mb-2">
+                                    <Clock className="w-4 h-4" />
+                                    Request Delay (seconds)
+                                    <button
+                                        onClick={() => { }}
+                                        className="p-1 rounded-full hover:bg-gray-600 text-gray-400 transition-colors cursor-help"
+                                        title="Free tier API plans often have strict rate limits (e.g., 30 requests per minute). This delay helps avoid hitting those limits during deck analysis. If you get rate limit errors, increase this value."
+                                    >
+                                        <Info className="w-3.5 h-3.5" />
+                                    </button>
+                                </label>
+                                <input
+                                    type="number"
+                                    min={0}
+                                    max={60}
+                                    step={0.5}
+                                    value={(llmConfig.requestDelayMs || 2000) / 1000}
+                                    onChange={(e) => updateConfig({ requestDelayMs: Math.max(0, Math.min(60000, parseFloat(e.target.value) * 1000 || 2000)) })}
+                                    className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                />
+                                <p className="mt-1 text-xs text-gray-400">
+                                    Delay between API requests during deck analysis. Free tier providers often have strict rate limits (e.g., Groq: 30 req/min). If you encounter rate limit errors, increase this value.
+                                </p>
+                            </div>
+                        </>
+                    )}
+
+                    {/* Display Tab */}
+                    {activeTab === 'display' && (
+                        <>
+                            {/* Dark Mode Toggle */}
+                            <div>
+                                <label className="flex items-center gap-3 cursor-pointer">
+                                    <div className="flex items-center gap-2 text-sm font-medium text-gray-300">
+                                        {llmConfig.darkMode !== false ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4" />}
+                                        Dark Mode
+                                    </div>
+                                    <input
+                                        type="checkbox"
+                                        checked={llmConfig.darkMode !== false}
+                                        onChange={(e) => updateConfig({ darkMode: e.target.checked })}
+                                        className="rounded border-gray-600 bg-gray-700 text-blue-500 focus:ring-blue-500"
+                                    />
+                                </label>
+                                <p className="mt-1 text-xs text-gray-400">
+                                    Toggle between dark and light theme. Dark mode is easier on the eyes in low-light environments.
+                                </p>
+                            </div>
+
+                            {/* Suggested Cards Layout */}
+                            <div>
+                                <label className="flex items-center gap-2 text-sm font-medium text-gray-300 mb-2">
+                                    <LayoutGrid className="w-4 h-4" />
+                                    Suggested Cards Layout
+                                </label>
+                                <select
+                                    value={llmConfig.suggestedCardsLayout || 'carousel'}
+                                    onChange={(e) => updateConfig({ suggestedCardsLayout: e.target.value as 'carousel' | 'list' })}
+                                    className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                >
+                                    <option value="carousel">Carousel (swipe through cards)</option>
+                                    <option value="list">Vertical List (show all cards)</option>
+                                </select>
+                                <p className="mt-1 text-xs text-gray-400">
+                                    Choose how suggested replacement cards are displayed. Carousel shows one card at a time with navigation; List shows all cards stacked vertically.
+                                </p>
+                            </div>
+
+                            {/* Inherit Card Metadata */}
+                            <div>
+                                <label className="flex items-center gap-3 cursor-pointer">
+                                    <div className="flex items-center gap-2 text-sm font-medium text-gray-300">
+                                        <History className="w-4 h-4" />
+                                        Inherit Scheduling Data
+                                    </div>
+                                    <input
+                                        type="checkbox"
+                                        checked={llmConfig.inheritCardMetadata || false}
+                                        onChange={(e) => updateConfig({ inheritCardMetadata: e.target.checked })}
+                                        className="rounded border-gray-600 bg-gray-700 text-blue-500 focus:ring-blue-500"
+                                    />
+                                </label>
+                                <p className="mt-1 text-xs text-gray-400">
+                                    When adding a suggested replacement card, inherit the scheduling metadata (interval, ease factor, repetitions, lapses) from the original card. By default, new cards start fresh with no review history.
+                                </p>
+                            </div>
+                        </>
+                    )}
+
+                    {/* Caching Tab */}
+                    {activeTab === 'caching' && (
+                        <>
+                            <div>
+                                <h3 className="text-lg font-semibold text-gray-200 mb-4 flex items-center gap-2">
+                                    <Database className="w-5 h-5" />
+                                    Analysis Cache
+                                </h3>
+                                <p className="text-sm text-gray-400 mb-4">
+                                    Analysis results are cached in your browser so you can reload decks and continue where you left off. Cached results are only used when the card content matches exactly (verified by hash).
+                                </p>
+
+                                {/* Total cache size */}
+                                {(() => {
+                                    const deckEntries = Object.values(cacheInfo);
+                                    const totalSize = deckEntries.reduce((sum, d) => sum + d.sizeBytes, 0);
+                                    const totalCards = deckEntries.reduce((sum, d) => sum + d.cardCount, 0);
+
+                                    return (
+                                        <div className="bg-gray-700 rounded-lg p-4 mb-4">
+                                            <div className="flex items-center justify-between">
+                                                <div>
+                                                    <div className="text-sm font-medium text-gray-300">Total Cache Size</div>
+                                                    <div className="text-2xl font-bold text-blue-400">{formatBytes(totalSize)}</div>
+                                                    <div className="text-xs text-gray-400">{totalCards} cards cached across {deckEntries.length} deck(s)</div>
+                                                </div>
+                                                {deckEntries.length > 0 && (
+                                                    <button
+                                                        onClick={() => {
+                                                            if (confirm('Are you sure you want to clear all cached analyses? This cannot be undone.')) {
+                                                                clearAllCaches();
+                                                                setCacheRefreshKey(k => k + 1);
+                                                            }
+                                                        }}
+                                                        className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg text-sm transition-colors"
+                                                    >
+                                                        <Trash2 className="w-4 h-4" />
+                                                        Clear All
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </div>
+                                    );
+                                })()}
+
+                                {/* Cached decks list */}
+                                {Object.keys(cacheInfo).length === 0 ? (
+                                    <div className="text-center py-8 text-gray-500">
+                                        <Database className="w-12 h-12 mx-auto mb-3 opacity-50" />
+                                        <p>No cached analyses yet</p>
+                                        <p className="text-sm mt-1">Analyze cards to populate the cache</p>
+                                    </div>
+                                ) : (
+                                    <div className="space-y-2">
+                                        <div className="text-sm font-medium text-gray-400 mb-2">Cached Decks</div>
+                                        {Object.values(cacheInfo)
+                                            .sort((a, b) => b.lastUpdated - a.lastUpdated)
+                                            .map((deck) => (
+                                                <div
+                                                    key={deck.deckFileName}
+                                                    className="bg-gray-700 rounded-lg p-3 flex items-center justify-between"
+                                                >
+                                                    <div className="min-w-0 flex-1">
+                                                        <div className="text-sm font-medium text-gray-200 truncate" title={deck.deckFileName}>
+                                                            {deck.deckFileName}
+                                                        </div>
+                                                        <div className="flex items-center gap-3 text-xs text-gray-400 mt-1">
+                                                            <span>{deck.cardCount} cards</span>
+                                                            <span>•</span>
+                                                            <span>{formatBytes(deck.sizeBytes)}</span>
+                                                            <span>•</span>
+                                                            <span>Updated {new Date(deck.lastUpdated).toLocaleDateString()}</span>
+                                                        </div>
+                                                    </div>
+                                                    <button
+                                                        onClick={() => {
+                                                            if (confirm(`Clear cached analyses for "${deck.deckFileName}"?`)) {
+                                                                clearDeckCache(deck.deckFileName);
+                                                                setCacheRefreshKey(k => k + 1);
+                                                            }
+                                                        }}
+                                                        className="flex-shrink-0 p-2 text-gray-400 hover:text-red-400 hover:bg-gray-600 rounded-lg transition-colors"
+                                                        title="Clear cache for this deck"
+                                                    >
+                                                        <Trash2 className="w-4 h-4" />
+                                                    </button>
+                                                </div>
+                                            ))}
+                                    </div>
+                                )}
+                            </div>
+                        </>
+                    )}
                 </div>
 
-                {/* Footer */}
-                <div className="px-6 py-4 bg-gray-700 flex justify-end gap-3">
-                    <button
-                        onClick={() => setShowSettings(false)}
-                        className="px-4 py-2 bg-gray-600 hover:bg-gray-500 rounded-lg transition-colors"
-                    >
-                        Cancel
-                    </button>
-                    <button
-                        onClick={handleSave}
-                        className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
-                    >
-                        <Save className="w-4 h-4" />
-                        Save Settings
-                    </button>
-                </div>
             </div>
         </div>
     );
 };
+
