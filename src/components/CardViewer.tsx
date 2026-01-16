@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Tag, FileText, Calendar, BarChart3, History, Trash2, Undo2, Pencil } from 'lucide-react';
+import { RichTextField } from './RichTextField';
 import {
     LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Scatter, ScatterChart, ZAxis
 } from 'recharts';
@@ -17,6 +18,7 @@ interface CardViewerProps {
     onUpdateFields?: (noteId: number, fields: { name: string; value: string }[]) => void;
     editedFields?: { name: string; value: string }[];
     isEdited?: boolean;
+    onRestoreEdits?: (noteId: number) => void;
 }
 
 // Helper to format queue type
@@ -137,11 +139,13 @@ export const CardViewer: React.FC<CardViewerProps> = ({
     isSuggestion = false,
     onUpdateFields,
     editedFields,
-    isEdited = false
+    isEdited = false,
+    onRestoreEdits
 }) => {
     const [activeTab, setActiveTab] = useState<ViewerTab>('content');
     const [chartTab, setChartTab] = useState<ChartTab>('ease');
     const [localFields, setLocalFields] = useState<{ name: string; value: string }[]>([]);
+    const [editedBadgeHovered, setEditedBadgeHovered] = useState(false);
 
     // For delete button functionality
     const markCardForDeletion = useAppStore(state => state.markCardForDeletion);
@@ -149,16 +153,16 @@ export const CardViewer: React.FC<CardViewerProps> = ({
     const isCardMarkedForDeletion = useAppStore(state => state.isCardMarkedForDeletion);
     const deleteCard = useAppStore(state => state.deleteCard);
     const isGeneratedCard = useAppStore(state => state.isGeneratedCard);
+    const getOriginalFields = useAppStore(state => state.getOriginalFields);
 
     // Handle both RenderedCard and SuggestedCard formats
     const isRenderedCard = 'front' in card && 'back' in card;
 
-    let front: string;
-    let back: string;
     let cardType: CardType;
     let css = '';
     let tags: string[] = [];
-    let fields: { name: string; value: string }[] = [];
+    // Base fields from the card object (may be stale if edited)
+    let cardFields: { name: string; value: string }[] = [];
 
     // Scheduling data (only for rendered cards)
     let hasSchedulingData = false;
@@ -177,12 +181,10 @@ export const CardViewer: React.FC<CardViewerProps> = ({
 
     if (isRenderedCard) {
         const rc = card as RenderedCard;
-        front = rc.front;
-        back = rc.back;
         cardType = rc.type;
         css = rc.css;
         tags = rc.tags;
-        fields = rc.fields;
+        cardFields = rc.fields;
 
         // Get scheduling data
         hasSchedulingData = true;
@@ -201,20 +203,7 @@ export const CardViewer: React.FC<CardViewerProps> = ({
     } else {
         const sc = card as SuggestedCard;
         cardType = sc.type;
-        fields = sc.fields;
-
-        if (cardType === 'cloze') {
-            const clozeField = sc.fields.find(f => f.name.toLowerCase() === 'text' || f.name.toLowerCase() === 'front');
-            const text = clozeField?.value || sc.fields[0]?.value || '';
-            front = text;
-            const extraField = sc.fields.find(f => f.name.toLowerCase() === 'extra' || f.name.toLowerCase() === 'back');
-            back = extraField?.value || '<span class="text-gray-400 italic">No extra content</span>';
-        } else {
-            const frontField = sc.fields.find(f => f.name.toLowerCase() === 'front');
-            const backField = sc.fields.find(f => f.name.toLowerCase() === 'back');
-            front = frontField?.value || sc.fields[0]?.value || '';
-            back = backField?.value || sc.fields[1]?.value || '';
-        }
+        cardFields = sc.fields;
     }
 
     // Compute average time per review
@@ -229,14 +218,29 @@ export const CardViewer: React.FC<CardViewerProps> = ({
     const isMarked = cardId !== null && isCardMarkedForDeletion(cardId);
     const isGenerated = cardId !== null && isGeneratedCard(cardId);
 
-    // Initialize local fields with edited fields or original fields
-    useEffect(() => {
-        if (editedFields) {
-            setLocalFields(editedFields);
-        } else {
-            setLocalFields(fields.map(f => ({ ...f })));
+    // Compute the effective fields to display:
+    // - If edited, use editedFields from store
+    // - Otherwise, get original fields from store (which is the source of truth)
+    const effectiveFields = React.useMemo(() => {
+        if (isEdited && editedFields) {
+            return editedFields;
         }
-    }, [card, editedFields]);
+        // For rendered cards, get the original fields from the store
+        if (isRenderedCard && noteId !== null) {
+            const originals = getOriginalFields(noteId);
+            if (originals.length > 0) {
+                return originals;
+            }
+        }
+        // Fallback to card fields
+        return cardFields;
+    }, [isEdited, editedFields, isRenderedCard, noteId, getOriginalFields, cardFields]);
+
+    // Initialize local fields from effective fields
+    // This effect ensures local state syncs with the source of truth
+    useEffect(() => {
+        setLocalFields(effectiveFields.map(f => ({ ...f })));
+    }, [effectiveFields]);
 
     // Handle field change
     const handleFieldChange = (index: number, newValue: string) => {
@@ -247,6 +251,13 @@ export const CardViewer: React.FC<CardViewerProps> = ({
         // Notify parent to persist the change
         if (onUpdateFields && noteId !== null) {
             onUpdateFields(noteId, newFields);
+        }
+    };
+
+    // Handle restore edits - unified handler for the revert button
+    const handleRestoreEdits = () => {
+        if (noteId !== null && onRestoreEdits) {
+            onRestoreEdits(noteId);
         }
     };
 
@@ -278,8 +289,8 @@ export const CardViewer: React.FC<CardViewerProps> = ({
                             <button
                                 onClick={handleToggleDelete}
                                 className={`flex items-center gap-1 px-2 py-1 text-xs rounded transition-colors ${isMarked
-                                        ? 'bg-gray-600 hover:bg-gray-500 text-gray-200'
-                                        : 'bg-red-600/80 hover:bg-red-600 text-red-100'
+                                    ? 'bg-gray-600 hover:bg-gray-500 text-gray-200'
+                                    : 'bg-red-600/80 hover:bg-red-600 text-red-100'
                                     }`}
                                 title={isGenerated ? 'Permanently delete this generated card' : (isMarked ? 'Unmark for deletion' : 'Mark for deletion (will be excluded on export)')}
                             >
@@ -298,10 +309,28 @@ export const CardViewer: React.FC<CardViewerProps> = ({
                         )}
                         {/* Edited badge */}
                         {isEdited && isRenderedCard && !isSuggestion && (
-                            <span className="flex items-center gap-1 px-2 py-0.5 text-xs rounded bg-yellow-600/80 text-yellow-100">
-                                <Pencil className="w-3 h-3" />
-                                Edited
-                            </span>
+                            <button
+                                onClick={handleRestoreEdits}
+                                onMouseEnter={() => setEditedBadgeHovered(true)}
+                                onMouseLeave={() => setEditedBadgeHovered(false)}
+                                className={`flex items-center gap-1 px-2 py-0.5 text-xs rounded transition-colors ${editedBadgeHovered
+                                        ? 'bg-blue-600/80 text-blue-100 hover:bg-blue-500/80'
+                                        : 'bg-yellow-600/80 text-yellow-100'
+                                    }`}
+                                title={editedBadgeHovered ? 'Restore original content' : 'Card has been edited'}
+                            >
+                                {editedBadgeHovered ? (
+                                    <>
+                                        <Undo2 className="w-3 h-3" />
+                                        Revert
+                                    </>
+                                ) : (
+                                    <>
+                                        <Pencil className="w-3 h-3" />
+                                        Edited
+                                    </>
+                                )}
+                            </button>
                         )}
                         <span className={`px-2 py-0.5 text-xs rounded ${isSuggestion ? 'bg-green-600' : 'bg-blue-600'
                             }`}>
@@ -317,8 +346,8 @@ export const CardViewer: React.FC<CardViewerProps> = ({
                     <button
                         onClick={() => setActiveTab('content')}
                         className={`flex items-center gap-1.5 px-4 py-2 text-xs font-medium transition-colors ${activeTab === 'content'
-                                ? 'text-blue-400 border-b-2 border-blue-400 bg-gray-800/50'
-                                : 'text-gray-400 hover:text-gray-300 hover:bg-gray-700/50'
+                            ? 'text-blue-400 border-b-2 border-blue-400 bg-gray-800/50'
+                            : 'text-gray-400 hover:text-gray-300 hover:bg-gray-700/50'
                             }`}
                     >
                         <FileText className="w-3.5 h-3.5" />
@@ -327,8 +356,8 @@ export const CardViewer: React.FC<CardViewerProps> = ({
                     <button
                         onClick={() => setActiveTab('scheduling')}
                         className={`flex items-center gap-1.5 px-4 py-2 text-xs font-medium transition-colors ${activeTab === 'scheduling'
-                                ? 'text-blue-400 border-b-2 border-blue-400 bg-gray-800/50'
-                                : 'text-gray-400 hover:text-gray-300 hover:bg-gray-700/50'
+                            ? 'text-blue-400 border-b-2 border-blue-400 bg-gray-800/50'
+                            : 'text-gray-400 hover:text-gray-300 hover:bg-gray-700/50'
                             }`}
                     >
                         <Calendar className="w-3.5 h-3.5" />
@@ -337,8 +366,8 @@ export const CardViewer: React.FC<CardViewerProps> = ({
                     <button
                         onClick={() => setActiveTab('history')}
                         className={`flex items-center gap-1.5 px-4 py-2 text-xs font-medium transition-colors ${activeTab === 'history'
-                                ? 'text-blue-400 border-b-2 border-blue-400 bg-gray-800/50'
-                                : 'text-gray-400 hover:text-gray-300 hover:bg-gray-700/50'
+                            ? 'text-blue-400 border-b-2 border-blue-400 bg-gray-800/50'
+                            : 'text-gray-400 hover:text-gray-300 hover:bg-gray-700/50'
                             }`}
                     >
                         <History className="w-3.5 h-3.5" />
@@ -347,8 +376,8 @@ export const CardViewer: React.FC<CardViewerProps> = ({
                     <button
                         onClick={() => setActiveTab('fields')}
                         className={`flex items-center gap-1.5 px-4 py-2 text-xs font-medium transition-colors ${activeTab === 'fields'
-                                ? 'text-blue-400 border-b-2 border-blue-400 bg-gray-800/50'
-                                : 'text-gray-400 hover:text-gray-300 hover:bg-gray-700/50'
+                            ? 'text-blue-400 border-b-2 border-blue-400 bg-gray-800/50'
+                            : 'text-gray-400 hover:text-gray-300 hover:bg-gray-700/50'
                             }`}
                     >
                         <BarChart3 className="w-3.5 h-3.5" />
@@ -357,7 +386,7 @@ export const CardViewer: React.FC<CardViewerProps> = ({
                 </div>
             )}
 
-            {/* Content Tab */}
+            {/* Content Tab - Editable Fields */}
             {(!showTabs || activeTab === 'content') && (
                 <>
                     {/* Tags */}
@@ -370,26 +399,19 @@ export const CardViewer: React.FC<CardViewerProps> = ({
 
                     <style>{css}</style>
 
-                    {/* Front / Text */}
-                    <div className="p-4 border-b border-gray-700">
-                        <div className="text-xs text-gray-400 uppercase tracking-wider mb-2">
-                            {cardType === 'cloze' ? 'Text' : 'Front'}
-                        </div>
-                        <div
-                            className="prose prose-sm max-w-none bg-white text-gray-900 p-4 rounded-lg"
-                            dangerouslySetInnerHTML={{ __html: front }}
-                        />
-                    </div>
-
-                    {/* Back / Extra */}
-                    <div className="p-4">
-                        <div className="text-xs text-gray-400 uppercase tracking-wider mb-2">
-                            {cardType === 'cloze' ? 'Extra (optional)' : 'Back'}
-                        </div>
-                        <div
-                            className="prose prose-sm max-w-none bg-gray-100 text-gray-900 p-4 rounded-lg"
-                            dangerouslySetInnerHTML={{ __html: back }}
-                        />
+                    {/* Editable Fields */}
+                    <div className="p-4 space-y-4">
+                        {localFields.map((field, index) => (
+                            <RichTextField
+                                key={field.name}
+                                label={field.name}
+                                value={field.value}
+                                onChange={(newValue) => handleFieldChange(index, newValue)}
+                                showClozeButton={cardType === 'cloze'}
+                                placeholder={`Enter ${field.name.toLowerCase()}...`}
+                                minHeight="80px"
+                            />
+                        ))}
                     </div>
                 </>
             )}
@@ -444,9 +466,9 @@ export const CardViewer: React.FC<CardViewerProps> = ({
                         <div className="flex justify-between border-b border-gray-700 pb-1">
                             <span className="text-gray-400 font-medium">Status</span>
                             <span className={`${queue === 0 ? 'text-blue-400' :
-                                    queue === 1 ? 'text-yellow-400' :
-                                        queue === 2 ? 'text-green-400' :
-                                            queue < 0 ? 'text-red-400' : 'text-gray-200'
+                                queue === 1 ? 'text-yellow-400' :
+                                    queue === 2 ? 'text-green-400' :
+                                        queue < 0 ? 'text-red-400' : 'text-gray-200'
                                 }`}>
                                 {getQueueName(queue)}
                             </span>
@@ -492,8 +514,8 @@ export const CardViewer: React.FC<CardViewerProps> = ({
                                         key={tab.id}
                                         onClick={() => setChartTab(tab.id)}
                                         className={`px-3 py-1.5 text-xs font-medium rounded-t transition-colors ${chartTab === tab.id
-                                                ? `bg-gray-700 ${tab.color} border-b-2 border-current`
-                                                : 'text-gray-500 hover:text-gray-300 hover:bg-gray-700/50'
+                                            ? `bg-gray-700 ${tab.color} border-b-2 border-current`
+                                            : 'text-gray-500 hover:text-gray-300 hover:bg-gray-700/50'
                                             }`}
                                     >
                                         {tab.label}
@@ -670,17 +692,17 @@ export const CardViewer: React.FC<CardViewerProps> = ({
                                             <tr key={index} className="border-b border-gray-700 hover:bg-gray-700/50">
                                                 <td className="py-1.5 px-2 text-gray-300">{formatDateTime(review.id)}</td>
                                                 <td className={`py-1.5 px-2 ${review.type === 0 ? 'text-blue-400' :
-                                                        review.type === 1 ? 'text-green-400' :
-                                                            review.type === 2 ? 'text-orange-400' :
-                                                                'text-gray-400'
+                                                    review.type === 1 ? 'text-green-400' :
+                                                        review.type === 2 ? 'text-orange-400' :
+                                                            'text-gray-400'
                                                     }`}>
                                                     {getReviewTypeName(review.type)}
                                                 </td>
                                                 <td className={`py-1.5 px-2 text-center font-medium ${review.ease === 1 ? 'text-red-400' :
-                                                        review.ease === 2 ? 'text-yellow-400' :
-                                                            review.ease === 3 ? 'text-green-400' :
-                                                                review.ease === 4 ? 'text-blue-400' :
-                                                                    'text-gray-400'
+                                                    review.ease === 2 ? 'text-yellow-400' :
+                                                        review.ease === 3 ? 'text-green-400' :
+                                                            review.ease === 4 ? 'text-blue-400' :
+                                                                'text-gray-400'
                                                     }`}>
                                                     {review.ease}
                                                 </td>
@@ -697,12 +719,12 @@ export const CardViewer: React.FC<CardViewerProps> = ({
                 </div>
             )}
 
-            {/* Fields Tab - Editable */}
+            {/* Raw Fields Tab - Text/HTML editing */}
             {showTabs && activeTab === 'fields' && (
                 <div className="p-4 space-y-3">
                     <div className="flex items-center gap-2 text-xs text-gray-400 mb-2">
                         <Pencil className="w-3 h-3" />
-                        <span>Click any field below to edit. Changes are saved automatically.</span>
+                        <span>Edit raw HTML content. For rich text editing, use the Content tab.</span>
                     </div>
                     {localFields.map((field, index) => (
                         <div key={index} className="bg-gray-700 rounded-lg p-3">

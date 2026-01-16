@@ -1,8 +1,8 @@
 import React, { useMemo, useRef, useCallback } from 'react';
 import { ChevronRight, ChevronDown, Folder, FolderOpen, CreditCard, Loader2 } from 'lucide-react';
+import { toast } from 'sonner';
 import { useAppStore } from '../store/useAppStore';
 import { parseApkgFile } from '../utils/ankiParser';
-import { useToastStore } from '../store/useToastStore';
 import type { AnkiDeck } from '../types';
 
 interface DeckNodeProps {
@@ -118,7 +118,6 @@ export const DeckBrowser: React.FC = () => {
     const setCollection = useAppStore(state => state.setCollection);
     const setIsLoadingCollection = useAppStore(state => state.setIsLoadingCollection);
     const setLoadingProgress = useAppStore(state => state.setLoadingProgress);
-    const addToast = useToastStore(state => state.addToast);
     const [expanded, setExpanded] = React.useState<Set<number>>(new Set());
     const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -134,22 +133,18 @@ export const DeckBrowser: React.FC = () => {
                 setLoadingProgress(progress);
             });
             setCollection(collection, file.name);
-            addToast({
-                type: 'success',
-                title: 'Deck loaded successfully',
-                message: `Found ${collection.decks.size} decks and ${collection.cards.size} cards`
+            toast.success('Deck loaded successfully', {
+                description: `Found ${collection.decks.size} decks and ${collection.cards.size} cards`
             });
         } catch (error) {
             console.error('Failed to parse APKG file:', error);
             setIsLoadingCollection(false);
             setLoadingProgress(null);
-            addToast({
-                type: 'error',
-                title: 'Failed to load deck',
-                message: error instanceof Error ? error.message : 'Unknown error'
+            toast.error('Failed to load deck', {
+                description: error instanceof Error ? error.message : 'Unknown error'
             });
         }
-    }, [setCollection, addToast, setIsLoadingCollection, setLoadingProgress]);
+    }, [setCollection, setIsLoadingCollection, setLoadingProgress]);
 
     const handleFolderClick = () => {
         fileInputRef.current?.click();

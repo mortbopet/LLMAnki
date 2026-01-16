@@ -1,6 +1,15 @@
 // Anki Card Types
 export type CardType = 'basic' | 'basic-reversed' | 'cloze' | 'basic-type' | 'basic-optional-reversed';
 
+/**
+ * Represents a single field on a card with name and value.
+ * This is the canonical type used throughout the application for card fields.
+ */
+export interface CardField {
+  name: string;
+  value: string;
+}
+
 export interface AnkiCard {
   id: number;
   noteId: number;
@@ -86,7 +95,7 @@ export interface RenderedCard {
   type: CardType;
   front: string;
   back: string;
-  fields: { name: string; value: string }[];
+  fields: CardField[];
   tags: string[];
   css: string;
   // Scheduling metadata
@@ -141,7 +150,7 @@ export interface CardFeedback {
 
 export interface SuggestedCard {
   type: CardType;
-  fields: { name: string; value: string }[];
+  fields: CardField[];
   explanation: string;
 }
 

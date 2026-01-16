@@ -9,9 +9,15 @@ import type {
   DeckAnalysisResult,
   UndoableAction,
   AnkiCard,
-  AnkiNote
+  AnkiNote,
+  CardType
 } from '../types';
 import { getDefaultConfig } from '../utils/llmService';
+import {
+  updateCardFields as updateCardFieldsService,
+  restoreCardToOriginal,
+  getOriginalFields,
+} from '../services/cardState';
 import { 
   cacheAnalysisResult, 
   loadValidCachedResults,
@@ -19,6 +25,27 @@ import {
   saveDeckState,
   type DeckState
 } from '../utils/analysisCache';
+
+// State for the AddCardPanel - stored per deck
+interface AddCardPanelState {
+  activeTab: 'manual' | 'ai';
+  aiPrompt: string;
+  suggestedCards: SuggestedCard[];
+  addedCards: Array<{ suggestedIndex: number; cardId: number }>;
+  carouselIndex: number;
+  manualCardType: CardType;
+  manualFields: Array<{ name: string; value: string }>;
+}
+
+const DEFAULT_ADD_CARD_PANEL_STATE: AddCardPanelState = {
+  activeTab: 'manual',
+  aiPrompt: '',
+  suggestedCards: [],
+  addedCards: [],
+  carouselIndex: 0,
+  manualCardType: 'basic',
+  manualFields: [{ name: 'Front', value: '' }, { name: 'Back', value: '' }],
+};
 
 interface AppState {
   // Collection state
@@ -63,6 +90,9 @@ interface AppState {
   deckAnalysisProgress: { current: number; total: number } | null;
   deckAnalysisCancelled: boolean;
   
+  // Add card panel state per deck - Map<deckId, state>
+  addCardPanelState: Map<number, AddCardPanelState>;
+  
   // Suggested cards from analysis
   suggestedCards: SuggestedCard[];
   editingSuggestionIndex: number | null;
@@ -95,6 +125,10 @@ interface AppState {
   removeSuggestedCard: (index: number) => void;
   setEditingSuggestionIndex: (index: number | null) => void;
   
+  // Add card panel state per deck
+  getAddCardPanelState: (deckId: number) => AddCardPanelState;
+  setAddCardPanelState: (deckId: number, state: Partial<AddCardPanelState>) => void;
+  
   // Card operations with undo/redo
   addCardToDeck: (suggestedCard: SuggestedCard, deckId: number, sourceCardId?: number, suggestedIndex?: number) => number | null;
   deleteCard: (cardId: number) => void;
@@ -105,7 +139,9 @@ interface AppState {
   getAddedCardId: (sourceCardId: number, suggestedIndex: number) => number | null;
   updateCardFields: (noteId: number, fields: { name: string; value: string }[]) => void;
   getEditedFields: (noteId: number) => { name: string; value: string }[] | undefined;
+  getOriginalFields: (noteId: number) => { name: string; value: string }[];
   isCardEdited: (noteId: number) => boolean;
+  restoreCardEdits: (noteId: number) => void;
   undo: () => void;
   redo: () => void;
   canUndo: () => boolean;
@@ -143,6 +179,7 @@ export const useAppStore = create<AppState>()(
       analysisError: null,
       analysisCache: new Map(),
       deckAnalysisCache: new Map(),
+      addCardPanelState: new Map(),
       analyzingDeckId: null,
       deckAnalysisProgress: null,
       deckAnalysisCancelled: false,
@@ -164,6 +201,7 @@ export const useAppStore = create<AppState>()(
         analysisError: null,
         analysisCache: new Map(),
         deckAnalysisCache: new Map(),
+        addCardPanelState: new Map(),
         generatedCardIds: new Set(),
         markedForDeletion: new Set(),
         editedCards: new Map(),
@@ -286,6 +324,21 @@ export const useAppStore = create<AppState>()(
       },
       
       setEditingSuggestionIndex: (index) => set({ editingSuggestionIndex: index }),
+      
+      // Get add card panel state for a deck
+      getAddCardPanelState: (deckId) => {
+        const state = get().addCardPanelState.get(deckId);
+        return state || { ...DEFAULT_ADD_CARD_PANEL_STATE };
+      },
+      
+      // Update add card panel state for a deck
+      setAddCardPanelState: (deckId, newState) => {
+        const currentMap = get().addCardPanelState;
+        const currentState = currentMap.get(deckId) || { ...DEFAULT_ADD_CARD_PANEL_STATE };
+        const updatedMap = new Map(currentMap);
+        updatedMap.set(deckId, { ...currentState, ...newState });
+        set({ addCardPanelState: updatedMap });
+      },
       
       // Add a card to the deck (immediately, with undo support)
       addCardToDeck: (suggestedCard, deckId, sourceCardId, suggestedIndex) => {
@@ -640,11 +693,31 @@ export const useAppStore = create<AppState>()(
         return entry?.addedCardId ?? null;
       },
       
-      // Update card fields (for editing)
+      // Update card fields (for editing) - uses cardState service for logic
       updateCardFields: (noteId, fields) => {
-        const editedCards = new Map(get().editedCards);
-        editedCards.set(noteId, fields);
-        set({ editedCards });
+        const collection = get().collection;
+        if (!collection) return;
+        
+        // Use the card state service to handle the update logic
+        const result = updateCardFieldsService(
+          collection,
+          noteId,
+          fields,
+          get().editedCards
+        );
+        
+        // Invalidate analysis cache if content changed
+        let analysisCache = get().analysisCache;
+        if (result.shouldInvalidateCache) {
+          analysisCache = new Map(analysisCache);
+          for (const [cardId, card] of collection.cards) {
+            if (card.noteId === noteId) {
+              analysisCache.delete(cardId);
+            }
+          }
+        }
+        
+        set({ editedCards: result.editedCards, analysisCache });
         // Persist state after editing
         get().persistDeckState();
       },
@@ -654,6 +727,23 @@ export const useAppStore = create<AppState>()(
       
       // Check if a card has been edited
       isCardEdited: (noteId) => get().editedCards.has(noteId),
+
+      // Restore card to original (remove edits) - uses cardState service
+      restoreCardEdits: (noteId) => {
+        // Only update if the card was actually edited
+        if (!get().editedCards.has(noteId)) return;
+        
+        const editedCards = restoreCardToOriginal(noteId, get().editedCards);
+        set({ editedCards });
+        get().persistDeckState();
+      },
+      
+      // Get the original fields for a card (before any edits)
+      getOriginalFields: (noteId) => {
+        const collection = get().collection;
+        if (!collection) return [];
+        return getOriginalFields(collection, noteId);
+      },
       
       // Load deck state from localStorage (generated cards, marked for deletion, edited cards)
       loadDeckState: () => {

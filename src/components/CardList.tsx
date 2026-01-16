@@ -1,5 +1,6 @@
-import React, { useMemo, useCallback, useState } from 'react';
-import { CreditCard, Tag, Layers, Search, X, CheckCircle, AlertCircle, Wand2, Trash2, Undo2, ArrowUpDown, ChevronDown } from 'lucide-react';
+import React, { useMemo, useCallback, useState, useRef } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
+import { CreditCard, Tag, Layers, Search, X, CheckCircle, AlertCircle, Wand2, Trash2, Undo2, ArrowUpDown, ChevronDown, Pencil, RotateCcw } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 import { renderCard, getCardTypeName } from '../utils/cardRenderer';
 import { getCardsInDeck } from '../utils/ankiParser';
@@ -14,10 +15,12 @@ interface CardListItemProps {
     cachedResult: LLMAnalysisResult | undefined;
     isGenerated: boolean;
     isMarkedForDeletion: boolean;
+    isEdited: boolean;
     onSelect: () => void;
     onMarkForDeletion: (id: number) => void;
     onUnmarkForDeletion: (id: number) => void;
     onDeleteCard: (id: number) => void;
+    onRestoreEdits: (noteId: number) => void;
 }
 
 const CardListItem: React.FC<CardListItemProps> = ({
@@ -28,12 +31,15 @@ const CardListItem: React.FC<CardListItemProps> = ({
     cachedResult,
     isGenerated,
     isMarkedForDeletion,
+    isEdited,
     onSelect,
     onMarkForDeletion,
     onUnmarkForDeletion,
-    onDeleteCard
+    onDeleteCard,
+    onRestoreEdits
 }) => {
     const [hovered, setHovered] = useState(false);
+    const [editedBadgeHovered, setEditedBadgeHovered] = useState(false);
 
     const handleDelete = (e: React.MouseEvent) => {
         e.stopPropagation();
@@ -50,9 +56,14 @@ const CardListItem: React.FC<CardListItemProps> = ({
         onUnmarkForDeletion(card.id);
     };
 
+    const handleRestoreEdits = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        onRestoreEdits(card.noteId);
+    };
+
     return (
         <div
-            className={`relative p-2 rounded cursor-pointer transition-colors ${isMarkedForDeletion
+            className={`relative p-2 mb-1 rounded cursor-pointer transition-colors ${isMarkedForDeletion
                 ? (isSelected ? 'bg-red-800' : 'hover:bg-red-900/50 bg-red-900/30 border border-red-700/50 opacity-60')
                 : isSelected ? 'bg-blue-600' :
                     isGenerated ? 'hover:bg-purple-700/50 bg-purple-900/30 border border-purple-700/50' :
@@ -96,6 +107,27 @@ const CardListItem: React.FC<CardListItemProps> = ({
                         />
                         {isMarkedForDeletion && (
                             <span className="text-xs text-red-400 flex-shrink-0">Delete</span>
+                        )}
+                        {isEdited && !isMarkedForDeletion && (
+                            <button
+                                onClick={handleRestoreEdits}
+                                onMouseEnter={() => setEditedBadgeHovered(true)}
+                                onMouseLeave={() => setEditedBadgeHovered(false)}
+                                className={`flex items-center gap-0.5 text-xs flex-shrink-0 px-1 py-0.5 rounded transition-colors ${editedBadgeHovered
+                                        ? 'text-blue-400 bg-blue-900/40 hover:bg-blue-800/60'
+                                        : 'text-yellow-400'
+                                    }`}
+                                title={editedBadgeHovered ? "Restore original content" : "Card has been edited"}
+                            >
+                                {editedBadgeHovered ? (
+                                    <>
+                                        <RotateCcw className="w-3 h-3" />
+                                        <span>Restore</span>
+                                    </>
+                                ) : (
+                                    <Pencil className="w-3 h-3" />
+                                )}
+                            </button>
                         )}
                         {isGenerated && !isMarkedForDeletion && (
                             <span className="text-xs text-purple-400 flex-shrink-0">New</span>
@@ -151,7 +183,10 @@ export const CardList: React.FC = () => {
     const markCardForDeletion = useAppStore(state => state.markCardForDeletion);
     const unmarkCardForDeletion = useAppStore(state => state.unmarkCardForDeletion);
     const deleteCard = useAppStore(state => state.deleteCard);
+    const isCardEdited = useAppStore(state => state.isCardEdited);
+    const restoreCardEdits = useAppStore(state => state.restoreCardEdits);
 
+    const parentRef = useRef<HTMLDivElement>(null);
     const [renderedCards, setRenderedCards] = React.useState<Map<number, RenderedCard>>(new Map());
     const [isLoading, setIsLoading] = React.useState(false);
     const [searchQuery, setSearchQuery] = useState('');
@@ -207,6 +242,18 @@ export const CardList: React.FC = () => {
             return 0;
         });
     }, [filteredCards, sortBy, analysisCache, isCardMarkedForDeletion, isGeneratedCard]);
+
+    // Virtualizer for efficient rendering of large lists
+    const rowVirtualizer = useVirtualizer({
+        count: cards.length,
+        getScrollElement: () => parentRef.current,
+        estimateSize: () => 72, // Initial estimate, will be measured dynamically
+        overscan: 5, // Render 5 extra items above and below viewport
+        measureElement: (element) => {
+            // Dynamically measure each element's actual height
+            return element.getBoundingClientRect().height;
+        },
+    });
 
     // Render cards when selection changes
     React.useEffect(() => {
@@ -378,24 +425,52 @@ export const CardList: React.FC = () => {
                 </div>
             )}
 
-            {/* Card list */}
-            <div className="flex-1 overflow-y-auto p-2 space-y-1">
-                {cards.map(card => (
-                    <CardListItem
-                        key={card.id}
-                        card={card}
-                        rendered={renderedCards.get(card.id)}
-                        isSelected={selectedCardId === card.id}
-                        isAnalyzed={analysisCache.has(card.id)}
-                        cachedResult={analysisCache.get(card.id)}
-                        isGenerated={isGeneratedCard(card.id)}
-                        isMarkedForDeletion={isCardMarkedForDeletion(card.id)}
-                        onSelect={() => handleSelectCard(card)}
-                        onMarkForDeletion={markCardForDeletion}
-                        onUnmarkForDeletion={unmarkCardForDeletion}
-                        onDeleteCard={deleteCard}
-                    />
-                ))}
+            {/* Card list - Virtualized for performance */}
+            <div
+                ref={parentRef}
+                className="flex-1 overflow-y-auto p-2"
+            >
+                <div
+                    style={{
+                        height: `${rowVirtualizer.getTotalSize()}px`,
+                        width: '100%',
+                        position: 'relative',
+                    }}
+                >
+                    {rowVirtualizer.getVirtualItems().map((virtualItem) => {
+                        const card = cards[virtualItem.index];
+                        return (
+                            <div
+                                key={card.id}
+                                data-index={virtualItem.index}
+                                ref={rowVirtualizer.measureElement}
+                                style={{
+                                    position: 'absolute',
+                                    top: 0,
+                                    left: 0,
+                                    width: '100%',
+                                    transform: `translateY(${virtualItem.start}px)`,
+                                }}
+                            >
+                                <CardListItem
+                                    card={card}
+                                    rendered={renderedCards.get(card.id)}
+                                    isSelected={selectedCardId === card.id}
+                                    isAnalyzed={analysisCache.has(card.id)}
+                                    cachedResult={analysisCache.get(card.id)}
+                                    isGenerated={isGeneratedCard(card.id)}
+                                    isMarkedForDeletion={isCardMarkedForDeletion(card.id)}
+                                    isEdited={isCardEdited(card.noteId)}
+                                    onSelect={() => handleSelectCard(card)}
+                                    onMarkForDeletion={markCardForDeletion}
+                                    onUnmarkForDeletion={unmarkCardForDeletion}
+                                    onDeleteCard={deleteCard}
+                                    onRestoreEdits={restoreCardEdits}
+                                />
+                            </div>
+                        );
+                    })}
+                </div>
             </div>
         </div>
     );

@@ -1,7 +1,7 @@
 import React from 'react';
 import { Swiper, SwiperSlide } from 'swiper/react';
 import { Navigation, Pagination } from 'swiper/modules';
-import { Plus, Edit3, Trash2, Check, X } from 'lucide-react';
+import { Plus, Trash2, Check, X } from 'lucide-react';
 import { CardViewer } from './CardViewer';
 import type { SuggestedCard } from '../types';
 import type { Swiper as SwiperType } from 'swiper';
@@ -11,7 +11,7 @@ import type { Swiper as SwiperType } from 'swiper';
 interface CardCarouselProps {
     cards: SuggestedCard[];
     onAddCard?: (card: SuggestedCard, index: number) => void;
-    onEditCard?: (index: number) => void;
+    onUpdateCard?: (index: number, card: SuggestedCard) => void;
     onRemoveCard?: (index: number) => void;
     onRemoveAddedCard?: (index: number) => void;
     showActions?: boolean;
@@ -24,7 +24,7 @@ interface CardCarouselProps {
 export const CardCarousel: React.FC<CardCarouselProps> = ({
     cards,
     onAddCard,
-    onEditCard,
+    onUpdateCard,
     onRemoveCard,
     onRemoveAddedCard,
     showActions = true,
@@ -37,6 +37,14 @@ export const CardCarousel: React.FC<CardCarouselProps> = ({
 
     const handleSlideChange = (swiper: SwiperType) => {
         onSlideChange?.(swiper.activeIndex);
+    };
+
+    // Handle field updates for suggested cards
+    const handleUpdateFields = (index: number) => (_noteId: number, fields: { name: string; value: string }[]) => {
+        if (onUpdateCard) {
+            const updatedCard = { ...cards[index], fields };
+            onUpdateCard(index, updatedCard);
+        }
     };
 
     return (
@@ -67,7 +75,7 @@ export const CardCarousel: React.FC<CardCarouselProps> = ({
                     const isAdded = addedIndices.includes(index);
                     return (
                         <SwiperSlide key={index}>
-                            <div className={`relative group pb-4 ${isAdded ? 'opacity-50' : ''}`}>
+                            <div className={`pb-4 ${isAdded ? 'opacity-50' : ''}`}>
                                 <div className={`rounded-lg shadow-lg shadow-black/30 transition-shadow overflow-hidden ${isAdded
                                     ? 'ring-1 ring-gray-500/30'
                                     : 'ring-1 ring-green-500/30 hover:shadow-xl hover:shadow-black/40'
@@ -103,38 +111,32 @@ export const CardCarousel: React.FC<CardCarouselProps> = ({
                                         card={card}
                                         title={`${titlePrefix} ${index + 1}`}
                                         isSuggestion
+                                        onUpdateFields={handleUpdateFields(index)}
                                     />
                                 </div>
 
-                                {/* Action buttons - only show if not already added */}
+                                {/* Action buttons below card - only show if not already added */}
                                 {showActions && !isAdded && (
-                                    <div className="absolute top-2 right-2 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity z-10">
-                                        {onEditCard && (
-                                            <button
-                                                onClick={() => onEditCard(index)}
-                                                className="p-2 bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors"
-                                                title="Edit card"
-                                            >
-                                                <Edit3 className="w-4 h-4" />
-                                            </button>
-                                        )}
+                                    <div className="flex gap-2 mt-3 px-1">
                                         {onRemoveCard && (
                                             <button
                                                 onClick={() => onRemoveCard(index)}
-                                                className="p-2 bg-gray-700 hover:bg-red-600 rounded-lg transition-colors"
+                                                className="flex items-center gap-1 px-3 py-2 bg-gray-700 hover:bg-red-600 rounded-lg transition-colors text-sm"
                                                 title="Remove suggestion"
                                             >
                                                 <Trash2 className="w-4 h-4" />
+                                                Remove
                                             </button>
                                         )}
+                                        <div className="flex-1" />
                                         {onAddCard && (
                                             <button
                                                 onClick={() => onAddCard(card, index)}
-                                                className="px-3 py-2 bg-green-600 hover:bg-green-700 rounded-lg transition-colors text-sm font-medium"
+                                                className="flex items-center gap-1 px-3 py-2 bg-green-600 hover:bg-green-700 rounded-lg transition-colors text-sm font-medium"
                                                 title="Add to deck"
                                             >
-                                                <Plus className="w-4 h-4 inline mr-1" />
-                                                Add
+                                                <Plus className="w-4 h-4" />
+                                                Add to Deck
                                             </button>
                                         )}
                                     </div>

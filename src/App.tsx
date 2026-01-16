@@ -11,7 +11,8 @@ import {
     Info,
     Undo2,
     Redo2,
-    BarChart3
+    BarChart3,
+    Plus
 } from 'lucide-react';
 import { useAppStore } from './store/useAppStore';
 import { useTheme } from './hooks/useTheme';
@@ -26,6 +27,7 @@ import { ToastContainer } from './components/ToastContainer';
 import { SystemPromptUpdateModal } from './components/SystemPromptUpdateModal';
 import { ErrorModal } from './components/ErrorModal';
 import { LandingPage } from './components/LandingPage';
+import { AddCardPanel } from './components/AddCardPanel';
 import { analyzeCard, analyzeCardsInDeck, generateDeckInsights, getApiKey, DEFAULT_SYSTEM_PROMPT, SYSTEM_PROMPT_VERSION } from './utils/llmService';
 import { exportCollection, getCardsInDeck } from './utils/ankiParser';
 import { renderCard } from './utils/cardRenderer';
@@ -72,15 +74,20 @@ function App() {
     const loadCachedAnalysesForDeck = useAppStore(state => state.loadCachedAnalysesForDeck);
     const loadDeckState = useAppStore(state => state.loadDeckState);
 
-    // Card editing
+    // Card editing - subscribe to editedCards map directly to trigger re-renders on changes
     const updateCardFields = useAppStore(state => state.updateCardFields);
-    const getEditedFields = useAppStore(state => state.getEditedFields);
-    const isCardEdited = useAppStore(state => state.isCardEdited);
+    const editedCards = useAppStore(state => state.editedCards);
+    const restoreCardEdits = useAppStore(state => state.restoreCardEdits);
 
     const [additionalPrompt, setAdditionalPrompt] = useState('');
     const [deckAdditionalPrompt, setDeckAdditionalPrompt] = useState('');
     const [showPromptUpdateModal, setShowPromptUpdateModal] = useState(false);
     const [cacheLoadedForFile, setCacheLoadedForFile] = useState<string | null>(null);
+    // Track which deck has the add card panel open (null = closed)
+    const [addCardPanelDeckId, setAddCardPanelDeckId] = useState<number | null>(null);
+
+    // Show add card panel only if it's open for the current deck
+    const showAddCardPanel = addCardPanelDeckId !== null && addCardPanelDeckId === selectedDeckId;
 
     // Keyboard shortcuts for undo/redo
     useEffect(() => {
@@ -203,9 +210,7 @@ function App() {
             }
         }
 
-        if (analyzedCards.length === 0) return null;
-
-        // Compute score distribution
+        // Compute score distribution (may be empty if no cards analyzed)
         const scoreDistribution: { score: number; count: number }[] = [];
         for (let s = 1; s <= 10; s++) {
             scoreDistribution.push({
@@ -214,7 +219,9 @@ function App() {
             });
         }
 
-        const avgScore = analyzedCards.reduce((sum, a) => sum + a.score, 0) / analyzedCards.length;
+        const avgScore = analyzedCards.length > 0
+            ? analyzedCards.reduce((sum, a) => sum + a.score, 0) / analyzedCards.length
+            : 0;
         const totalSuggestions = analyzedCards.reduce((sum, a) => sum + a.suggestions, 0);
 
         const deck = collection.decks.get(selectedDeckId);
@@ -224,7 +231,7 @@ function App() {
             deckName: deck?.name || 'Unknown Deck',
             totalCards: cards.length,
             analyzedCards: analyzedCards.length,
-            averageScore: Math.round(avgScore * 10) / 10,
+            averageScore: analyzedCards.length > 0 ? Math.round(avgScore * 10) / 10 : 0,
             scoreDistribution,
             knowledgeCoverage: null,
             deckSummary: '',
@@ -511,8 +518,9 @@ function App() {
                                                 card={selectedCard}
                                                 title="Original Card"
                                                 onUpdateFields={updateCardFields}
-                                                editedFields={getEditedFields(selectedCard.noteId)}
-                                                isEdited={isCardEdited(selectedCard.noteId)}
+                                                editedFields={editedCards.get(selectedCard.noteId)}
+                                                isEdited={editedCards.has(selectedCard.noteId)}
+                                                onRestoreEdits={restoreCardEdits}
                                             />
                                         </div>
 
@@ -556,92 +564,114 @@ function App() {
                                 // Deck-level view (no card selected, but deck is selected)
                                 <div className="flex-1 overflow-y-auto p-6">
                                     <div className="max-w-4xl mx-auto space-y-6">
-                                        {/* Deck Info */}
-                                        <div>
-                                            <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
-                                                <Layers className="w-5 h-5" />
-                                                Deck Analysis
-                                            </h2>
-                                            <div className={`rounded-lg p-4 ${isDarkMode ? 'bg-gray-800' : 'bg-white shadow-sm border border-gray-200'}`}>
-                                                <p className={isDarkMode ? 'text-gray-300' : 'text-gray-700'}>
-                                                    <span className="font-medium">{collection.decks.get(selectedDeckId)?.name || 'Unknown Deck'}</span>
-                                                </p>
-                                                <p className={`text-sm mt-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                                                    {getCardsInDeck(collection, selectedDeckId, true).length} cards (including subdecks)
-                                                </p>
-                                            </div>
-                                        </div>
-
-                                        {/* Deck Analyze Buttons */}
-                                        <div className="flex flex-col items-center gap-3">
-                                            <div className="flex items-center gap-3">
-                                                <textarea
-                                                    value={deckAdditionalPrompt}
-                                                    onChange={(e) => setDeckAdditionalPrompt(e.target.value)}
-                                                    placeholder="Optional: focus area or topic..."
-                                                    rows={2}
-                                                    className={`px-3 py-2 border rounded-lg text-sm focus:outline-none focus:border-blue-500 w-64 resize-none ${isDarkMode ? 'bg-gray-700 border-gray-600' : 'bg-white border-gray-300'}`}
-                                                    disabled={isDeckAnalyzing}
-                                                />
-                                                <div className="flex flex-col gap-2">
-                                                    {isCurrentDeckAnalyzing && deckAnalysisProgress ? (
-                                                        <button
-                                                            onClick={handleStopDeckAnalysis}
-                                                            className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-red-600 to-orange-600 hover:from-red-700 hover:to-orange-700 rounded-lg font-medium transition-all shadow-lg hover:shadow-xl text-white"
-                                                            title="Stop the current card analysis"
-                                                        >
-                                                            <StopCircle className="w-4 h-4" />
-                                                            Stop ({deckAnalysisProgress.current}/{deckAnalysisProgress.total})
-                                                        </button>
-                                                    ) : (
-                                                        <button
-                                                            onClick={handleAnalyzeCards}
-                                                            disabled={isDeckAnalyzing}
-                                                            className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg font-medium transition-all shadow-lg hover:shadow-xl text-white"
-                                                            title="Run LLM analysis on each card in the deck. Skips already-analyzed cards."
-                                                        >
-                                                            {isDeckAnalyzing ? (
-                                                                <>
-                                                                    <Loader2 className="w-4 h-4 animate-spin" />
-                                                                    Analyzing...
-                                                                </>
-                                                            ) : (
-                                                                <>
-                                                                    <Wand2 className="w-4 h-4" />
-                                                                    Analyze Cards
-                                                                </>
-                                                            )}
-                                                        </button>
-                                                    )}
-                                                    <button
-                                                        onClick={handleGenerateDeckInsights}
-                                                        disabled={isDeckAnalyzing}
-                                                        className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-green-600 to-teal-600 hover:from-green-700 hover:to-teal-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg font-medium transition-all shadow-lg hover:shadow-xl text-white"
-                                                        title="Generate deck summary and suggestions from already-analyzed cards. Uses cached card analyses only."
-                                                    >
-                                                        {isCurrentDeckAnalyzing && !deckAnalysisProgress ? (
-                                                            <>
-                                                                <Loader2 className="w-4 h-4 animate-spin" />
-                                                                Generating...
-                                                            </>
-                                                        ) : (
-                                                            <>
-                                                                <BarChart3 className="w-4 h-4" />
-                                                                Generate Insights
-                                                            </>
-                                                        )}
-                                                    </button>
+                                        {/* Show AddCardPanel if open */}
+                                        {showAddCardPanel ? (
+                                            <AddCardPanel
+                                                deckId={selectedDeckId}
+                                                deckName={collection.decks.get(selectedDeckId)?.name || 'Unknown Deck'}
+                                                onClose={() => setAddCardPanelDeckId(null)}
+                                            />
+                                        ) : (
+                                            <>
+                                                {/* Deck Info */}
+                                                <div>
+                                                    <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
+                                                        <Layers className="w-5 h-5" />
+                                                        Deck Analysis
+                                                    </h2>
+                                                    <div className={`rounded-lg p-4 ${isDarkMode ? 'bg-gray-800' : 'bg-white shadow-sm border border-gray-200'}`}>
+                                                        <div className="flex items-center justify-between">
+                                                            <div>
+                                                                <p className={isDarkMode ? 'text-gray-300' : 'text-gray-700'}>
+                                                                    <span className="font-medium">{collection.decks.get(selectedDeckId)?.name || 'Unknown Deck'}</span>
+                                                                </p>
+                                                                <p className={`text-sm mt-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                                                                    {getCardsInDeck(collection, selectedDeckId, true).length} cards (including subdecks)
+                                                                </p>
+                                                            </div>
+                                                            <button
+                                                                onClick={() => setAddCardPanelDeckId(selectedDeckId)}
+                                                                className="flex items-center gap-2 px-3 py-2 bg-green-600 hover:bg-green-700 rounded-lg transition-colors text-sm font-medium text-white"
+                                                            >
+                                                                <Plus className="w-4 h-4" />
+                                                                Add Cards
+                                                            </button>
+                                                        </div>
+                                                    </div>
                                                 </div>
-                                            </div>
-                                            <div className={`text-xs text-center space-y-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                                                <p><strong>Analyze Cards:</strong> Runs LLM on up to {llmConfig.maxDeckAnalysisCards} cards (skips cached)</p>
-                                                <p><strong>Generate Insights:</strong> Creates deck summary &amp; suggestions from analyzed cards</p>
-                                            </div>
-                                        </div>
 
-                                        {/* Deck Analysis Results - Show dynamic stats or full analysis */}
-                                        {dynamicDeckStats && (
-                                            <DeckAnalysisPanel result={dynamicDeckStats} />
+                                                {/* Deck Analyze Buttons */}
+                                                <div className="flex flex-col items-center gap-3">
+                                                    <div className="flex items-center gap-3">
+                                                        <textarea
+                                                            value={deckAdditionalPrompt}
+                                                            onChange={(e) => setDeckAdditionalPrompt(e.target.value)}
+                                                            placeholder="Optional: focus area or topic..."
+                                                            rows={2}
+                                                            className={`px-3 py-2 border rounded-lg text-sm focus:outline-none focus:border-blue-500 w-64 resize-none ${isDarkMode ? 'bg-gray-700 border-gray-600' : 'bg-white border-gray-300'}`}
+                                                            disabled={isDeckAnalyzing}
+                                                        />
+                                                        <div className="flex flex-col gap-2">
+                                                            {isCurrentDeckAnalyzing && deckAnalysisProgress ? (
+                                                                <button
+                                                                    onClick={handleStopDeckAnalysis}
+                                                                    className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-red-600 to-orange-600 hover:from-red-700 hover:to-orange-700 rounded-lg font-medium transition-all shadow-lg hover:shadow-xl text-white"
+                                                                    title="Stop the current card analysis"
+                                                                >
+                                                                    <StopCircle className="w-4 h-4" />
+                                                                    Stop ({deckAnalysisProgress.current}/{deckAnalysisProgress.total})
+                                                                </button>
+                                                            ) : (
+                                                                <button
+                                                                    onClick={handleAnalyzeCards}
+                                                                    disabled={isDeckAnalyzing}
+                                                                    className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg font-medium transition-all shadow-lg hover:shadow-xl text-white"
+                                                                    title="Run LLM analysis on each card in the deck. Skips already-analyzed cards."
+                                                                >
+                                                                    {isDeckAnalyzing ? (
+                                                                        <>
+                                                                            <Loader2 className="w-4 h-4 animate-spin" />
+                                                                            Analyzing...
+                                                                        </>
+                                                                    ) : (
+                                                                        <>
+                                                                            <Wand2 className="w-4 h-4" />
+                                                                            Analyze Cards
+                                                                        </>
+                                                                    )}
+                                                                </button>
+                                                            )}
+                                                            <button
+                                                                onClick={handleGenerateDeckInsights}
+                                                                disabled={isDeckAnalyzing}
+                                                                className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-green-600 to-teal-600 hover:from-green-700 hover:to-teal-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg font-medium transition-all shadow-lg hover:shadow-xl text-white"
+                                                                title="Generate deck summary and suggestions from already-analyzed cards. Uses cached card analyses only."
+                                                            >
+                                                                {isCurrentDeckAnalyzing && !deckAnalysisProgress ? (
+                                                                    <>
+                                                                        <Loader2 className="w-4 h-4 animate-spin" />
+                                                                        Generating...
+                                                                    </>
+                                                                ) : (
+                                                                    <>
+                                                                        <BarChart3 className="w-4 h-4" />
+                                                                        Generate Insights
+                                                                    </>
+                                                                )}
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                    <div className={`text-xs text-center space-y-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                                                        <p><strong>Analyze Cards:</strong> Runs LLM on up to {llmConfig.maxDeckAnalysisCards} cards (skips cached)</p>
+                                                        <p><strong>Generate Insights:</strong> Creates deck summary &amp; suggestions from analyzed cards</p>
+                                                    </div>
+                                                </div>
+
+                                                {/* Deck Analysis Results - Show dynamic stats or full analysis */}
+                                                {dynamicDeckStats && (
+                                                    <DeckAnalysisPanel result={dynamicDeckStats} />
+                                                )}
+                                            </>
                                         )}
                                     </div>
                                 </div>

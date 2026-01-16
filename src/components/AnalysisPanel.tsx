@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
     CheckCircle,
     XCircle,
@@ -14,7 +14,6 @@ import {
 import { useAppStore } from '../store/useAppStore';
 import { CardCarousel } from './CardCarousel';
 import { SuggestedCardsList } from './SuggestedCardsList';
-import { CardEditor } from './CardEditor';
 import type { LLMAnalysisResult, SuggestedCard } from '../types';
 
 interface AnalysisPanelProps {
@@ -38,8 +37,6 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ result }) => {
     const suggestedCardsState = useAppStore(state => state.suggestedCards);
     const updateSuggestedCard = useAppStore(state => state.updateSuggestedCard);
     const removeSuggestedCard = useAppStore(state => state.removeSuggestedCard);
-    const editingSuggestionIndex = useAppStore(state => state.editingSuggestionIndex);
-    const setEditingSuggestionIndex = useAppStore(state => state.setEditingSuggestionIndex);
     const addCardToDeck = useAppStore(state => state.addCardToDeck);
     const markCardForDeletion = useAppStore(state => state.markCardForDeletion);
     const unmarkCardForDeletion = useAppStore(state => state.unmarkCardForDeletion);
@@ -60,15 +57,10 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ result }) => {
     // Get indices of suggested cards that have already been added
     const addedIndices = selectedCard ? getAddedSuggestedIndices(selectedCard.id) : [];
 
-    const handleEditCard = (index: number) => {
-        setCarouselIndex(index); // Remember where we were
-        setEditingSuggestionIndex(index);
-    };
-
-    const handleSaveEdit = (index: number, card: SuggestedCard) => {
+    // Handle inline updates to suggested cards
+    const handleUpdateCard = useCallback((index: number, card: SuggestedCard) => {
         updateSuggestedCard(index, card);
-        setEditingSuggestionIndex(null);
-    };
+    }, [updateSuggestedCard]);
 
     const handleAddCard = (card: SuggestedCard, index: number) => {
         if (selectedDeckId !== null) {
@@ -237,18 +229,11 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ result }) => {
                         Suggested Replacement Cards ({displayCards.length})
                     </h3>
 
-                    {editingSuggestionIndex !== null ? (
-                        <CardEditor
-                            card={displayCards[editingSuggestionIndex]}
-                            onChange={(updated) => updateSuggestedCard(editingSuggestionIndex, updated)}
-                            onCancel={() => setEditingSuggestionIndex(null)}
-                            onSave={() => handleSaveEdit(editingSuggestionIndex, displayCards[editingSuggestionIndex])}
-                        />
-                    ) : suggestedCardsLayout === 'list' ? (
+                    {suggestedCardsLayout === 'list' ? (
                         <SuggestedCardsList
                             cards={displayCards}
                             onAddCard={(card, index) => handleAddCard(card, index)}
-                            onEditCard={(index) => handleEditCard(index)}
+                            onUpdateCard={handleUpdateCard}
                             onRemoveCard={(index) => removeSuggestedCard(index)}
                             onRemoveAddedCard={handleRemoveAddedCard}
                             titlePrefix="Suggested Card"
@@ -258,13 +243,13 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ result }) => {
                         <CardCarousel
                             cards={displayCards}
                             onAddCard={(card, index) => handleAddCard(card, index)}
-                            onEditCard={(index) => handleEditCard(index)}
+                            onUpdateCard={handleUpdateCard}
                             onRemoveCard={(index) => removeSuggestedCard(index)}
                             onRemoveAddedCard={handleRemoveAddedCard}
                             titlePrefix="Suggested Card"
+                            addedIndices={addedIndices}
                             initialSlide={carouselIndex}
                             onSlideChange={setCarouselIndex}
-                            addedIndices={addedIndices}
                         />
                     )}
                 </div>

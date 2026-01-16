@@ -1193,82 +1193,6 @@ export async function generateDeckInsights(
   };
 }
 
-// Legacy function for backwards compatibility - combines both steps
-export async function analyzeDeck(
-  collection: AnkiCollection,
-  deck: AnkiDeck,
-  cards: AnkiCard[],
-  config: LLMConfig,
-  additionalPrompt?: string,
-  onProgress?: (current: number, total: number, cardId?: number, result?: LLMAnalysisResult, fields?: { name: string; value: string }[]) => void,
-  isCancelled?: () => boolean,
-  existingCache?: Map<number, LLMAnalysisResult>
-): Promise<DeckAnalysisResult> {
-  // First analyze cards
-  const { results, error } = await analyzeCardsInDeck(
-    collection,
-    cards,
-    config,
-    onProgress,
-    isCancelled,
-    existingCache
-  );
-  
-  if (error) {
-    // Return partial results with error
-    return {
-      deckId: deck.id,
-      deckName: deck.name,
-      totalCards: cards.length,
-      analyzedCards: results.length,
-      averageScore: 0,
-      scoreDistribution: [],
-      knowledgeCoverage: null,
-      deckSummary: '',
-      suggestedNewCards: [],
-      addedSuggestedCardIndices: [],
-      totalSuggestedFromCards: 0,
-      error
-    };
-  }
-  
-  if (isCancelled?.()) {
-    // Return partial results if cancelled
-    const scores = results.map(r => r.result.feedback.overallScore);
-    const averageScore = scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : 0;
-    
-    return {
-      deckId: deck.id,
-      deckName: deck.name,
-      totalCards: cards.length,
-      analyzedCards: results.length,
-      averageScore: Math.round(averageScore * 10) / 10,
-      scoreDistribution: [],
-      knowledgeCoverage: null,
-      deckSummary: '',
-      suggestedNewCards: [],
-      addedSuggestedCardIndices: [],
-      totalSuggestedFromCards: 0
-    };
-  }
-  
-  // Build a cache from results for generateDeckInsights
-  const resultsCache = new Map<number, LLMAnalysisResult>();
-  for (const { cardId, result } of results) {
-    resultsCache.set(cardId, result);
-  }
-  
-  // Generate insights
-  return generateDeckInsights(
-    deck,
-    cards.length,
-    resultsCache,
-    results.map(r => r.cardId),
-    config,
-    additionalPrompt
-  );
-}
-
 // Generate deck summary with knowledge coverage analysis
 async function generateDeckSummaryWithCoverage(
   deck: AnkiDeck,
@@ -1530,5 +1454,206 @@ function parseDeckCoverageResponse(content: string): { summary: string; knowledg
     }
     
     return { summary: 'Unable to parse deck analysis. Please try again.', knowledgeCoverage: null, suggestedCards: [] };
+  }
+}
+
+/**
+ * Generate flashcards from a user prompt using LLM.
+ * This allows users to create new cards by describing what they want.
+ */
+export async function generateCardsFromPrompt(
+  prompt: string,
+  deckName: string,
+  config: LLMConfig
+): Promise<{ cards: SuggestedCard[]; error?: string }> {
+  const provider = LLM_PROVIDERS.find(p => p.id === config.providerId);
+  if (!provider) {
+    return { cards: [], error: `Unknown provider: ${config.providerId}` };
+  }
+  
+  const apiKey = getApiKey(config);
+  
+  const systemPrompt = `You are a flashcard creation expert. Your job is to create high-quality Anki flashcards based on the user's request.
+
+Follow these principles for creating effective flashcards:
+1. Each card should test ONE piece of information (atomic principle)
+2. Front side should be a clear question or prompt
+3. Back side should be a concise, complete answer
+4. Use cloze deletions for definitions or lists where appropriate
+5. Make cards specific and unambiguous
+6. Include context when needed to avoid confusion
+
+Respond ONLY with valid JSON in this format:
+{
+  "cards": [
+    {
+      "type": "basic" | "cloze",
+      "fields": [
+        { "name": "Front", "value": "question or prompt" },
+        { "name": "Back", "value": "answer or explanation" }
+      ],
+      "explanation": "brief reason why this card is useful"
+    }
+  ]
+}
+
+For cloze cards, use this format:
+{
+  "type": "cloze",
+  "fields": [
+    { "name": "Text", "value": "{{c1::cloze deletion}} in a sentence" },
+    { "name": "Extra", "value": "optional additional info" }
+  ],
+  "explanation": "reason for this card"
+}
+
+Create 3-10 cards depending on the topic complexity.`;
+
+  const userMessage = `Create flashcards for the following request. The cards will be added to a deck called "${deckName}".
+
+User request: ${prompt}`;
+
+  try {
+    let content: string;
+    
+    if (config.providerId === 'ollama') {
+      const ollama = new Ollama({ host: 'http://localhost:11434' });
+      const response = await ollama.chat({
+        model: config.model,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userMessage }
+        ],
+        options: { temperature: 0.7 }
+      });
+      content = response.message.content;
+    } else if (config.providerId === 'anthropic') {
+      const response = await fetch(`${provider.baseUrl}/messages`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true'
+        },
+        body: JSON.stringify({
+          model: config.model,
+          max_tokens: 4096,
+          system: systemPrompt,
+          messages: [{ role: 'user', content: userMessage }]
+        })
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        return { cards: [], error: `API error: ${errorText}` };
+      }
+      
+      const data = await response.json();
+      content = data.content[0].text;
+    } else {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+      if (config.providerId === 'openrouter') {
+        headers['HTTP-Referer'] = window.location.origin;
+        headers['X-Title'] = 'LLMAnki';
+      }
+      
+      const response = await fetch(`${provider.baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          model: config.model,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userMessage }
+          ],
+          temperature: 0.7,
+          max_tokens: 4096
+        })
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        return { cards: [], error: `API error: ${errorText}` };
+      }
+      
+      const data = await response.json();
+      content = data.choices[0].message.content;
+    }
+    
+    // Parse the response
+    const cards = parseGeneratedCards(content);
+    return { cards };
+    
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    return { cards: [], error: errorMessage };
+  }
+}
+
+/**
+ * Parse generated cards from LLM response
+ */
+function parseGeneratedCards(content: string): SuggestedCard[] {
+  let jsonStr = content;
+  
+  // Extract JSON from code blocks
+  const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (jsonMatch) {
+    jsonStr = jsonMatch[1];
+  } else {
+    const firstBrace = content.indexOf('{');
+    const lastBrace = content.lastIndexOf('}');
+    if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+      jsonStr = content.substring(firstBrace, lastBrace + 1);
+    }
+  }
+  
+  try {
+    const parsed = JSON.parse(jsonStr.trim());
+    const cards: SuggestedCard[] = [];
+    
+    const cardArray = parsed.cards || parsed.suggestedCards || (Array.isArray(parsed) ? parsed : []);
+    
+    for (const card of cardArray) {
+      if (card && typeof card === 'object') {
+        const type = ['basic', 'cloze', 'basic-reversed'].includes(card.type) ? card.type : 'basic';
+        
+        let fields: { name: string; value: string }[] = [];
+        if (Array.isArray(card.fields)) {
+          fields = card.fields.map((f: any) => ({
+            name: String(f.name || 'Field'),
+            value: String(f.value || '')
+          }));
+        }
+        
+        // Ensure basic cards have Front/Back, cloze cards have Text/Extra
+        if (fields.length === 0) {
+          if (type === 'cloze') {
+            fields = [
+              { name: 'Text', value: '' },
+              { name: 'Extra', value: '' }
+            ];
+          } else {
+            fields = [
+              { name: 'Front', value: '' },
+              { name: 'Back', value: '' }
+            ];
+          }
+        }
+        
+        cards.push({
+          type,
+          fields,
+          explanation: String(card.explanation || card.reasoning || '')
+        });
+      }
+    }
+    
+    return cards;
+  } catch (e) {
+    console.error('Failed to parse generated cards:', e);
+    return [];
   }
 }

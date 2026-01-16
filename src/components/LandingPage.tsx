@@ -1,8 +1,8 @@
 import React, { useCallback, useState } from 'react';
 import { Upload, Sparkles, FileText, Loader2, Wand2, Brain } from 'lucide-react';
+import { toast } from 'sonner';
 import { parseApkgFile } from '../utils/ankiParser';
 import { useAppStore } from '../store/useAppStore';
-import { useToastStore } from '../store/useToastStore';
 
 export const LandingPage: React.FC = () => {
     const setCollection = useAppStore(state => state.setCollection);
@@ -10,16 +10,13 @@ export const LandingPage: React.FC = () => {
     const loadingProgress = useAppStore(state => state.loadingProgress);
     const setIsLoadingCollection = useAppStore(state => state.setIsLoadingCollection);
     const setLoadingProgress = useAppStore(state => state.setLoadingProgress);
-    const addToast = useToastStore(state => state.addToast);
 
     const [isDragOver, setIsDragOver] = useState(false);
 
     const handleFile = useCallback(async (file: File) => {
         if (!file.name.endsWith('.apkg')) {
-            addToast({
-                type: 'warning',
-                title: 'Invalid file',
-                message: 'Please select a valid .apkg file'
+            toast.warning('Invalid file', {
+                description: 'Please select a valid .apkg file'
             });
             return;
         }
@@ -32,22 +29,18 @@ export const LandingPage: React.FC = () => {
                 setLoadingProgress(progress);
             });
             setCollection(collection, file.name);
-            addToast({
-                type: 'success',
-                title: 'Deck loaded successfully',
-                message: `Found ${collection.decks.size} decks and ${collection.cards.size} cards`
+            toast.success('Deck loaded successfully', {
+                description: `Found ${collection.decks.size} decks and ${collection.cards.size} cards`
             });
         } catch (error) {
             console.error('Failed to parse APKG file:', error);
             setIsLoadingCollection(false);
             setLoadingProgress(null);
-            addToast({
-                type: 'error',
-                title: 'Failed to load deck',
-                message: error instanceof Error ? error.message : 'Unknown error'
+            toast.error('Failed to load deck', {
+                description: error instanceof Error ? error.message : 'Unknown error'
             });
         }
-    }, [setCollection, addToast, setIsLoadingCollection, setLoadingProgress]);
+    }, [setCollection, setIsLoadingCollection, setLoadingProgress]);
 
     const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];

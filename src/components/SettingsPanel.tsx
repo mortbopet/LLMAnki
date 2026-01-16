@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Settings, X, RotateCcw, Key, Server, MessageSquare, Info, ExternalLink, Image, Layers, Zap, RefreshCw, Loader2, Clock, LayoutGrid, Cpu, SlidersHorizontal, Monitor, History, Sun, Moon, Database, Trash2 } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 import { LLM_PROVIDERS, DEFAULT_SYSTEM_PROMPT, PROVIDER_INFO, SYSTEM_PROMPT_VERSION, fetchProviderModels, clearModelCache, type ModelInfo } from '../utils/llmService';
-import { getCacheIndex, clearDeckCache, clearAllCaches, formatBytes, getGlobalCacheStats, type DeckCacheInfo } from '../utils/analysisCache';
+import { clearAllCaches, formatBytes, getGlobalCacheStats } from '../utils/analysisCache';
 import type { LLMConfig } from '../types';
 
 type SettingsTab = 'provider' | 'analysis' | 'display' | 'caching';
@@ -22,7 +22,6 @@ export const SettingsPanel: React.FC = () => {
     const [isLoadingModels, setIsLoadingModels] = useState(false);
     const [modelsError, setModelsError] = useState<string | null>(null);
     const [activeTab, setActiveTab] = useState<SettingsTab>('provider');
-    const [cacheInfo, setCacheInfo] = useState<Record<string, DeckCacheInfo>>({});
     const [globalCacheStats, setGlobalCacheStats] = useState<{ entryCount: number; sizeBytes: number; deckNames: string[] }>({ entryCount: 0, sizeBytes: 0, deckNames: [] });
     const [cacheRefreshKey, setCacheRefreshKey] = useState(0);
 
@@ -35,8 +34,6 @@ export const SettingsPanel: React.FC = () => {
     // Load cache info when caching tab is active
     useEffect(() => {
         if (activeTab === 'caching') {
-            const index = getCacheIndex();
-            setCacheInfo(index.decks);
             setGlobalCacheStats(getGlobalCacheStats());
         }
     }, [activeTab, cacheRefreshKey]);

@@ -312,3 +312,28 @@ html:not(.dark) ::-webkit-scrollbar-thumb:hover {
 .spinner {
   @apply animate-spin rounded-full border-4 border-gray-300 border-t-blue-500;
 }
+
+/* Editable field placeholder */
+.editor-content:empty:before {
+  content: attr(data-placeholder);
+  @apply text-gray-500 italic;
+  pointer-events: none;
+}
+
+/* Editable field in dark mode */
+html.dark .editor-content {
+  @apply bg-gray-800 text-gray-100 border-gray-600;
+}
+
+html.dark .editor-content:focus {
+  @apply border-blue-500;
+}
+
+/* Editable field in light mode */
+html:not(.dark) .editor-content {
+  @apply bg-white text-gray-900 border-gray-300;
+}
+
+html:not(.dark) .editor-content:focus {
+  @apply border-blue-500;
+}

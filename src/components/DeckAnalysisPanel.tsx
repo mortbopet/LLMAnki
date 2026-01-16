@@ -56,7 +56,7 @@ const KnowledgeCoverageSection: React.FC<{ coverage: KnowledgeCoverage }> = ({ c
                     <div className="w-24 h-2 bg-gray-700 rounded-full overflow-hidden">
                         <div
                             className={`h-full rounded-full ${coverage.coverageScore >= 7 ? 'bg-green-500' :
-                                    coverage.coverageScore >= 5 ? 'bg-yellow-500' : 'bg-red-500'
+                                coverage.coverageScore >= 5 ? 'bg-yellow-500' : 'bg-red-500'
                                 }`}
                             style={{ width: `${coverage.coverageScore * 10}%` }}
                         />
@@ -191,10 +191,11 @@ export const DeckAnalysisPanel: React.FC<DeckAnalysisPanelProps> = ({ result }) 
                         <div className="text-xs text-gray-400">Analyzed</div>
                     </div>
                     <div className="bg-gray-700 rounded-lg p-3 text-center">
-                        <div className={`text-2xl font-bold ${result.averageScore >= 7 ? 'text-green-400' :
-                            result.averageScore >= 5 ? 'text-yellow-400' : 'text-red-400'
+                        <div className={`text-2xl font-bold ${result.analyzedCards === 0 ? 'text-gray-500' :
+                                result.averageScore >= 7 ? 'text-green-400' :
+                                    result.averageScore >= 5 ? 'text-yellow-400' : 'text-red-400'
                             }`}>
-                            {result.averageScore}/10
+                            {result.analyzedCards === 0 ? 'N/A' : `${result.averageScore}/10`}
                         </div>
                         <div className="text-xs text-gray-400">Avg Score</div>
                     </div>
