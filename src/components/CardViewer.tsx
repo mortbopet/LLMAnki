@@ -212,7 +212,7 @@ export const CardViewer: React.FC<CardViewerProps> = ({
 
     // Get card ID for delete functionality and field updates (only for rendered cards)
     const cardId = isRenderedCard ? (card as RenderedCard).id : null;
-    
+
     // Get card state from the store
     const cardState = cardId !== null ? cards.get(cardId) : null;
     const domainCard = cardId !== null ? getCard(cardId) : null;
@@ -312,8 +312,8 @@ export const CardViewer: React.FC<CardViewerProps> = ({
                                 onMouseEnter={() => setEditedBadgeHovered(true)}
                                 onMouseLeave={() => setEditedBadgeHovered(false)}
                                 className={`flex items-center gap-1 px-2 py-0.5 text-xs rounded transition-colors ${editedBadgeHovered
-                                        ? 'bg-blue-600/80 text-blue-100 hover:bg-blue-500/80'
-                                        : 'bg-yellow-600/80 text-yellow-100'
+                                    ? 'bg-blue-600/80 text-blue-100 hover:bg-blue-500/80'
+                                    : 'bg-yellow-600/80 text-yellow-100'
                                     }`}
                                 title={editedBadgeHovered ? 'Restore original content' : 'Card has been edited'}
                             >

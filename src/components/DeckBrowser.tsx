@@ -22,7 +22,7 @@ const DeckNode: React.FC<DeckNodeProps> = ({ deck, level, expanded, onToggle, on
     const collection = useAppStore(state => state.collection);
     const analyzingDeckId = useAppStore(state => state.analyzingDeckId);
     const generatedDeckIds = useAppStore(state => state.generatedDeckIds);
-    
+
     const [showMenu, setShowMenu] = useState(false);
     const [isRenaming, setIsRenaming] = useState(false);
     const [renameValue, setRenameValue] = useState('');
@@ -52,20 +52,20 @@ const DeckNode: React.FC<DeckNodeProps> = ({ deck, level, expanded, onToggle, on
     const displayName = deck.name.includes('::')
         ? deck.name.split('::').pop()
         : deck.name;
-        
+
     const handleStartRename = () => {
         setRenameValue(displayName || deck.name);
         setIsRenaming(true);
         setShowMenu(false);
     };
-    
+
     const handleConfirmRename = () => {
         if (renameValue.trim()) {
             onRename(deck.id, renameValue.trim());
         }
         setIsRenaming(false);
     };
-    
+
     const handleCancelRename = () => {
         setIsRenaming(false);
         setRenameValue('');
@@ -143,7 +143,7 @@ const DeckNode: React.FC<DeckNodeProps> = ({ deck, level, expanded, onToggle, on
                         )}
                     </span>
                 )}
-                
+
                 {!isRenaming && (
                     <div className="relative">
                         <button
@@ -155,7 +155,7 @@ const DeckNode: React.FC<DeckNodeProps> = ({ deck, level, expanded, onToggle, on
                         >
                             <MoreVertical className="w-4 h-4" />
                         </button>
-                        
+
                         {showMenu && (
                             <div
                                 className="absolute right-0 top-6 z-50 bg-gray-800 border border-gray-700 rounded shadow-lg py-1 min-w-[140px]"
@@ -228,7 +228,7 @@ export const DeckBrowser: React.FC = () => {
     const renameDeck = useAppStore(state => state.renameDeck);
     const generatedDeckIds = useAppStore(state => state.generatedDeckIds);
     const createEmptyCollection = useAppStore(state => state.createEmptyCollection);
-    
+
     const [expanded, setExpanded] = useState<Set<number>>(new Set());
     const [isCreatingDeck, setIsCreatingDeck] = useState(false);
     const [newDeckName, setNewDeckName] = useState('');
@@ -263,10 +263,10 @@ export const DeckBrowser: React.FC = () => {
     const handleFolderClick = () => {
         fileInputRef.current?.click();
     };
-    
+
     const handleCreateDeck = () => {
         if (!newDeckName.trim()) return;
-        
+
         if (pendingSubdeckParent !== null) {
             const deckId = createSubdeck(pendingSubdeckParent, newDeckName.trim());
             if (deckId) {
@@ -280,12 +280,12 @@ export const DeckBrowser: React.FC = () => {
                 toast.success('Deck created', { description: newDeckName.trim() });
             }
         }
-        
+
         setNewDeckName('');
         setIsCreatingDeck(false);
         setPendingSubdeckParent(null);
     };
-    
+
     const handleStartCreateDeck = () => {
         if (!collection) {
             createEmptyCollection();
@@ -293,24 +293,24 @@ export const DeckBrowser: React.FC = () => {
         setIsCreatingDeck(true);
         setPendingSubdeckParent(null);
     };
-    
+
     const handleStartCreateSubdeck = (parentId: number) => {
         setIsCreatingDeck(true);
         setPendingSubdeckParent(parentId);
         setNewDeckName('');
     };
-    
+
     const handleDeleteDeck = (deckId: number) => {
         const deck = collection?.decks.get(deckId);
         if (!deck) return;
-        
+
         // Simple confirm for now
         if (confirm(`Delete "${deck.name.split('::').pop()}"? Cards will be moved to the Default deck.`)) {
             deleteDeckAction(deckId, false, false);
             toast.success('Deck deleted');
         }
     };
-    
+
     const handleRenameDeck = (deckId: number, newName: string) => {
         renameDeck(deckId, newName);
         toast.success('Deck renamed');
@@ -391,7 +391,7 @@ export const DeckBrowser: React.FC = () => {
                         <Plus className="w-4 h-4 text-gray-400 hover:text-white" />
                     </button>
                 </div>
-                
+
                 {isCreatingDeck && (
                     <div className="mb-2 px-2">
                         <div className="flex items-center gap-1 p-2 bg-gray-800 rounded border border-gray-700">
@@ -415,12 +415,12 @@ export const DeckBrowser: React.FC = () => {
                             <button onClick={handleCreateDeck} className="p-0.5 hover:bg-gray-600 rounded">
                                 <Check className="w-4 h-4 text-green-400" />
                             </button>
-                            <button 
+                            <button
                                 onClick={() => {
                                     setIsCreatingDeck(false);
                                     setNewDeckName('');
                                     setPendingSubdeckParent(null);
-                                }} 
+                                }}
                                 className="p-0.5 hover:bg-gray-600 rounded"
                             >
                                 <X className="w-4 h-4 text-red-400" />
@@ -433,7 +433,7 @@ export const DeckBrowser: React.FC = () => {
                         )}
                     </div>
                 )}
-                
+
                 {collection.deckTree.map(deck => (
                     <DeckNode
                         key={deck.id}
@@ -448,7 +448,7 @@ export const DeckBrowser: React.FC = () => {
                     />
                 ))}
             </div>
-            
+
             <div className="p-2 border-t border-gray-700">
                 <button
                     onClick={handleFolderClick}

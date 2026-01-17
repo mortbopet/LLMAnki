@@ -60,7 +60,7 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ result }) => {
         if (!cardState) return null;
         return { id: cardState.cardId };
     }, [selectedCardId, cards]);
-    
+
     const isCurrentCardMarked = useMemo(() => {
         if (!selectedCardId) return false;
         return cards.get(selectedCardId)?.isDeleted ?? false;

@@ -114,8 +114,8 @@ const CardListItem: React.FC<CardListItemProps> = ({
                                 onMouseEnter={() => setEditedBadgeHovered(true)}
                                 onMouseLeave={() => setEditedBadgeHovered(false)}
                                 className={`flex items-center gap-0.5 text-xs flex-shrink-0 px-1 py-0.5 rounded transition-colors ${editedBadgeHovered
-                                        ? 'text-blue-400 bg-blue-900/40 hover:bg-blue-800/60'
-                                        : 'text-yellow-400'
+                                    ? 'text-blue-400 bg-blue-900/40 hover:bg-blue-800/60'
+                                    : 'text-yellow-400'
                                     }`}
                                 title={editedBadgeHovered ? "Restore original content" : "Card has been edited"}
                             >
@@ -460,11 +460,11 @@ export const CardList: React.FC = () => {
                         const cardState = cards.get(card.id);
                         const persistedState = persistedCardState.get(card.id);
                         const domainCard = getCard(card.id);
-                        
+
                         // Use cardState if available, otherwise fall back to persistedState
                         const isDeleted = cardState?.isDeleted ?? persistedState?.isDeleted ?? false;
                         const isGenerated = cardState?.origin === 'generated' || persistedState?.origin === 'generated';
-                        
+
                         return (
                             <div
                                 key={card.id}

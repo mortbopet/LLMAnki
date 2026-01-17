@@ -71,7 +71,7 @@ function App() {
     // Card editing
     const updateCardFields = useAppStore(state => state.updateCardFields);
     const restoreCardFields = useAppStore(state => state.restoreCardFields);
-    
+
     // Compute derived state - selectedCard from cards Map
     const selectedCard = useMemo(() => {
         if (!selectedCardId) return null;
@@ -103,13 +103,13 @@ function App() {
             reviewHistory: [],
         } as RenderedCard;
     }, [selectedCardId, cards]);
-    
+
     // Compute analysisResult from selected card
     const analysisResult = useMemo(() => {
         if (!selectedCardId) return null;
         return cards.get(selectedCardId)?.analysis ?? null;
     }, [selectedCardId, cards]);
-    
+
     // Compute analysisCache as Map for functions that need it
     const analysisCache = useMemo(() => {
         const cache = new Map<number, LLMAnalysisResult>();
@@ -120,7 +120,7 @@ function App() {
         }
         return cache;
     }, [cards]);
-    
+
     // Compute which cards are edited for this card
     const selectedCardEdited = useMemo(() => {
         if (!selectedCardId) return { isEdited: false, editedFields: undefined };
@@ -132,7 +132,7 @@ function App() {
             editedFields: card?.isEdited ? cardState.currentFields : undefined,
         };
     }, [selectedCardId, cards, getCard]);
-    
+
     // Compute markedForDeletion as Set for export
     const markedForDeletion = useMemo(() => {
         const set = new Set<number>();

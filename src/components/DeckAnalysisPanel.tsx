@@ -192,8 +192,8 @@ export const DeckAnalysisPanel: React.FC<DeckAnalysisPanelProps> = ({ result }) 
                     </div>
                     <div className="bg-gray-700 rounded-lg p-3 text-center">
                         <div className={`text-2xl font-bold ${result.analyzedCards === 0 ? 'text-gray-500' :
-                                result.averageScore >= 7 ? 'text-green-400' :
-                                    result.averageScore >= 5 ? 'text-yellow-400' : 'text-red-400'
+                            result.averageScore >= 7 ? 'text-green-400' :
+                                result.averageScore >= 5 ? 'text-yellow-400' : 'text-red-400'
                             }`}>
                             {result.analyzedCards === 0 ? 'N/A' : `${result.averageScore}/10`}
                         </div>

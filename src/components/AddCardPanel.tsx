@@ -214,8 +214,8 @@ export const AddCardPanel: React.FC<AddCardPanelProps> = ({ deckId, deckName, on
                 <button
                     onClick={() => handleTabChange('manual')}
                     className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium transition-colors ${activeTab === 'manual'
-                            ? 'text-blue-400 border-b-2 border-blue-400 bg-gray-800/50'
-                            : 'text-gray-400 hover:text-gray-300 hover:bg-gray-700/50'
+                        ? 'text-blue-400 border-b-2 border-blue-400 bg-gray-800/50'
+                        : 'text-gray-400 hover:text-gray-300 hover:bg-gray-700/50'
                         }`}
                 >
                     <Plus className="w-4 h-4" />
@@ -224,8 +224,8 @@ export const AddCardPanel: React.FC<AddCardPanelProps> = ({ deckId, deckName, on
                 <button
                     onClick={() => handleTabChange('ai')}
                     className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium transition-colors ${activeTab === 'ai'
-                            ? 'text-blue-400 border-b-2 border-blue-400 bg-gray-800/50'
-                            : 'text-gray-400 hover:text-gray-300 hover:bg-gray-700/50'
+                        ? 'text-blue-400 border-b-2 border-blue-400 bg-gray-800/50'
+                        : 'text-gray-400 hover:text-gray-300 hover:bg-gray-700/50'
                         }`}
                 >
                     <Sparkles className="w-4 h-4" />
