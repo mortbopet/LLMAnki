@@ -316,13 +316,33 @@ export function getGeneratedDecksForPersistence(
 }
 
 /**
+ * Helper to find a deck in the deckTree by ID (recursive search)
+ */
+function findInTree(tree: AnkiDeck[], deckId: number): AnkiDeck | null {
+  for (const deck of tree) {
+    if (deck.id === deckId) return deck;
+    const found = findInTree(deck.children, deckId);
+    if (found) return found;
+  }
+  return null;
+}
+
+/**
  * Restore generated decks from persisted state
  */
 export function restoreGeneratedDecks(
   collection: AnkiCollection,
   persistedDecks: PersistedDeckInfo[]
 ): void {
-  for (const deckInfo of persistedDecks) {
+  // Sort decks so parents come before children (based on name depth)
+  // This ensures parents are restored before their children
+  const sortedDecks = [...persistedDecks].sort((a, b) => {
+    const aDepth = (a.name.match(/::/g) || []).length;
+    const bDepth = (b.name.match(/::/g) || []).length;
+    return aDepth - bDepth;
+  });
+
+  for (const deckInfo of sortedDecks) {
     if (deckInfo.origin !== 'generated') continue;
     if (collection.decks.has(deckInfo.deckId)) continue; // Already exists
     
@@ -338,11 +358,20 @@ export function restoreGeneratedDecks(
     
     // Add to parent or deck tree
     if (deckInfo.parentId) {
-      const parent = collection.decks.get(deckInfo.parentId);
-      if (parent) {
-        parent.children.push(ankiDeck);
-      } else {
-        // Parent not found, add to top level
+      // Update the parent in the decks Map
+      const parentInMap = collection.decks.get(deckInfo.parentId);
+      if (parentInMap) {
+        parentInMap.children.push(ankiDeck);
+      }
+      
+      // Also update the parent in the deckTree (might be a different object)
+      const parentInTree = findInTree(collection.deckTree, deckInfo.parentId);
+      if (parentInTree && parentInTree !== parentInMap) {
+        parentInTree.children.push(ankiDeck);
+      }
+      
+      // If parent not found anywhere, add to top level
+      if (!parentInMap && !parentInTree) {
         collection.deckTree.push(ankiDeck);
       }
     } else {

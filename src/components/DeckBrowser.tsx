@@ -16,6 +16,7 @@ interface NewDeckInputRowProps {
 const NewDeckInputRow: React.FC<NewDeckInputRowProps> = ({ level, placeholder, onConfirm, onCancel }) => {
     const [name, setName] = useState('');
     const inputRef = useRef<HTMLInputElement>(null);
+    const containerRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
         inputRef.current?.focus();
@@ -29,10 +30,20 @@ const NewDeckInputRow: React.FC<NewDeckInputRowProps> = ({ level, placeholder, o
         }
     };
 
+    // Cancel when clicking outside the input row
+    const handleBlur = (e: React.FocusEvent) => {
+        // Check if the new focus target is still within this component
+        if (containerRef.current && !containerRef.current.contains(e.relatedTarget as Node)) {
+            onCancel();
+        }
+    };
+
     return (
         <div
+            ref={containerRef}
             className="group flex items-center gap-1 py-1 px-2 rounded bg-gray-800 border border-gray-600"
             style={{ paddingLeft: `${level * 16 + 8}px` }}
+            onBlur={handleBlur}
         >
             <span className="w-5" /> {/* Spacer for chevron */}
             <Folder className="w-4 h-4 text-green-500 flex-shrink-0" />
@@ -261,6 +272,7 @@ const DeckNode: React.FC<DeckNodeProps> = ({
                 )}
             </div>
 
+            {/* Render children if expanded and has children */}
             {isExpanded && hasChildren && (
                 <div>
                     {deck.children.map(child => (
@@ -279,27 +291,16 @@ const DeckNode: React.FC<DeckNodeProps> = ({
                             onCancelSubdeck={onCancelSubdeck}
                         />
                     ))}
-                    {/* Show inline input for creating subdeck under this expanded deck */}
-                    {creatingSubdeckUnder === deck.id && (
-                        <NewDeckInputRow
-                            level={level + 1}
-                            placeholder="New subdeck name..."
-                            onConfirm={onConfirmSubdeck}
-                            onCancel={onCancelSubdeck}
-                        />
-                    )}
                 </div>
             )}
-            {/* Show inline input when the deck is not expanded but we're creating a subdeck under it */}
-            {!isExpanded && creatingSubdeckUnder === deck.id && (
-                <div>
-                    <NewDeckInputRow
-                        level={level + 1}
-                        placeholder="New subdeck name..."
-                        onConfirm={onConfirmSubdeck}
-                        onCancel={onCancelSubdeck}
-                    />
-                </div>
+            {/* Show inline input for creating subdeck - always visible when creating under this deck */}
+            {creatingSubdeckUnder === deck.id && (
+                <NewDeckInputRow
+                    level={level + 1}
+                    placeholder="New subdeck name..."
+                    onConfirm={onConfirmSubdeck}
+                    onCancel={onCancelSubdeck}
+                />
             )}
         </div>
     );

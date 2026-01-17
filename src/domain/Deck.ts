@@ -185,6 +185,18 @@ export class Deck {
    * Create a new deck within a collection.
    * If no collection exists, this will fail - use createEmptyCollection() first.
    */
+  /**
+   * Helper to find a deck in the deckTree by ID (recursive search)
+   */
+  private static findInTree(tree: AnkiDeck[], deckId: number): AnkiDeck | null {
+    for (const deck of tree) {
+      if (deck.id === deckId) return deck;
+      const found = Deck.findInTree(deck.children, deckId);
+      if (found) return found;
+    }
+    return null;
+  }
+
   static create(
     name: string,
     collection: AnkiCollection,
@@ -209,14 +221,21 @@ export class Deck {
       children: [],
     };
     
-    // Add to collection
+    // Add to collection's decks Map
     collection.decks.set(deckId, deckData);
     
-    // Update parent's children array
+    // Update parent's children array (in both decks Map AND deckTree)
     if (options.parentId) {
-      const parentDeck = collection.decks.get(options.parentId);
-      if (parentDeck) {
-        parentDeck.children.push(deckData);
+      // Update the parent in the decks Map
+      const parentInMap = collection.decks.get(options.parentId);
+      if (parentInMap) {
+        parentInMap.children.push(deckData);
+      }
+      
+      // Also update the parent in the deckTree (might be a different object due to Immer)
+      const parentInTree = Deck.findInTree(collection.deckTree, options.parentId);
+      if (parentInTree && parentInTree !== parentInMap) {
+        parentInTree.children.push(deckData);
       }
     } else {
       // Add to deck tree as top-level
