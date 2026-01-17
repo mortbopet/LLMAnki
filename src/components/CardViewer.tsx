@@ -15,10 +15,10 @@ interface CardViewerProps {
     card: RenderedCard | SuggestedCard;
     title?: string;
     isSuggestion?: boolean;
-    onUpdateFields?: (noteId: number, fields: { name: string; value: string }[]) => void;
+    onUpdateFields?: (cardId: number, fields: { name: string; value: string }[]) => void;
     editedFields?: { name: string; value: string }[];
     isEdited?: boolean;
-    onRestoreEdits?: (noteId: number) => void;
+    onRestoreEdits?: (cardId: number) => void;
 }
 
 // Helper to format queue type
@@ -148,12 +148,10 @@ export const CardViewer: React.FC<CardViewerProps> = ({
     const [editedBadgeHovered, setEditedBadgeHovered] = useState(false);
 
     // For delete button functionality
-    const markCardForDeletion = useAppStore(state => state.markCardForDeletion);
-    const unmarkCardForDeletion = useAppStore(state => state.unmarkCardForDeletion);
-    const isCardMarkedForDeletion = useAppStore(state => state.isCardMarkedForDeletion);
     const deleteCard = useAppStore(state => state.deleteCard);
-    const isGeneratedCard = useAppStore(state => state.isGeneratedCard);
-    const getOriginalFields = useAppStore(state => state.getOriginalFields);
+    const restoreCard = useAppStore(state => state.restoreCard);
+    const cards = useAppStore(state => state.cards);
+    const getCard = useAppStore(state => state.getCard);
 
     // Handle both RenderedCard and SuggestedCard formats
     const isRenderedCard = 'front' in card && 'back' in card;
@@ -212,29 +210,29 @@ export const CardViewer: React.FC<CardViewerProps> = ({
     // Only show tabs for rendered cards (not suggestions)
     const showTabs = isRenderedCard && !isSuggestion;
 
-    // Get card ID for delete functionality (only for rendered cards)
+    // Get card ID for delete functionality and field updates (only for rendered cards)
     const cardId = isRenderedCard ? (card as RenderedCard).id : null;
-    const noteId = isRenderedCard ? (card as RenderedCard).noteId : null;
-    const isMarked = cardId !== null && isCardMarkedForDeletion(cardId);
-    const isGenerated = cardId !== null && isGeneratedCard(cardId);
+    
+    // Get card state from the store
+    const cardState = cardId !== null ? cards.get(cardId) : null;
+    const domainCard = cardId !== null ? getCard(cardId) : null;
+    const isMarked = cardState?.isDeleted ?? false;
+    const isGenerated = cardState?.origin === 'generated';
 
     // Compute the effective fields to display:
     // - If edited, use editedFields from store
-    // - Otherwise, get original fields from store (which is the source of truth)
+    // - Otherwise, get original fields from the store (which is the source of truth)
     const effectiveFields = React.useMemo(() => {
         if (isEdited && editedFields) {
             return editedFields;
         }
-        // For rendered cards, get the original fields from the store
-        if (isRenderedCard && noteId !== null) {
-            const originals = getOriginalFields(noteId);
-            if (originals.length > 0) {
-                return originals;
-            }
+        // For rendered cards, get the original fields from the domain card
+        if (domainCard) {
+            return domainCard.originalFields;
         }
         // Fallback to card fields
         return cardFields;
-    }, [isEdited, editedFields, isRenderedCard, noteId, getOriginalFields, cardFields]);
+    }, [isEdited, editedFields, domainCard, cardFields]);
 
     // Initialize local fields from effective fields
     // This effect ensures local state syncs with the source of truth
@@ -249,15 +247,15 @@ export const CardViewer: React.FC<CardViewerProps> = ({
         setLocalFields(newFields);
 
         // Notify parent to persist the change
-        if (onUpdateFields && noteId !== null) {
-            onUpdateFields(noteId, newFields);
+        if (onUpdateFields && cardId !== null) {
+            onUpdateFields(cardId, newFields);
         }
     };
 
     // Handle restore edits - unified handler for the revert button
     const handleRestoreEdits = () => {
-        if (noteId !== null && onRestoreEdits) {
-            onRestoreEdits(noteId);
+        if (cardId !== null && onRestoreEdits) {
+            onRestoreEdits(cardId);
         }
     };
 
@@ -272,9 +270,9 @@ export const CardViewer: React.FC<CardViewerProps> = ({
 
         // For original cards, toggle mark for deletion
         if (isMarked) {
-            unmarkCardForDeletion(cardId);
+            restoreCard(cardId);
         } else {
-            markCardForDeletion(cardId);
+            deleteCard(cardId);
         }
     };
 

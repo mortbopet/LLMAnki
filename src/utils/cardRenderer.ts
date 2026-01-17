@@ -338,24 +338,3 @@ export function getCardTypeName(type: CardType): string {
       return 'Unknown';
   }
 }
-
-export function extractClozeNumbers(text: string): number[] {
-  const regex = /\{\{c(\d+)::/g;
-  const numbers = new Set<number>();
-  let match;
-  
-  while ((match = regex.exec(text)) !== null) {
-    numbers.add(parseInt(match[1]));
-  }
-  
-  return Array.from(numbers).sort((a, b) => a - b);
-}
-
-export function createClozeText(text: string, clozeNumber: number): string {
-  return `{{c${clozeNumber}::${text}}}`;
-}
-
-export function addClozeHint(clozeText: string, hint: string): string {
-  // Transforms {{c1::answer}} to {{c1::answer::hint}}
-  return clozeText.replace(/\}\}$/, `::${hint}}}`);
-}

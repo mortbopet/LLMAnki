@@ -30,9 +30,8 @@ import { LandingPage } from './components/LandingPage';
 import { AddCardPanel } from './components/AddCardPanel';
 import { analyzeCard, analyzeCardsInDeck, generateDeckInsights, getApiKey, DEFAULT_SYSTEM_PROMPT, SYSTEM_PROMPT_VERSION } from './utils/llmService';
 import { exportCollection, getCardsInDeck } from './utils/ankiParser';
-import { renderCard } from './utils/cardRenderer';
 
-import type { DeckAnalysisResult } from './types';
+import type { DeckAnalysisResult, RenderedCard, LLMAnalysisResult } from './types';
 
 function App() {
     // Apply theme to document
@@ -40,19 +39,17 @@ function App() {
 
     const collection = useAppStore(state => state.collection);
     const selectedDeckId = useAppStore(state => state.selectedDeckId);
-    const selectedCard = useAppStore(state => state.selectedCard);
     const selectedCardId = useAppStore(state => state.selectedCardId);
-    const analysisResult = useAppStore(state => state.analysisResult);
+    const cards = useAppStore(state => state.cards);
     const isAnalyzing = useAppStore(state => state.isAnalyzing);
     const analysisError = useAppStore(state => state.analysisError);
     const llmConfig = useAppStore(state => state.llmConfig);
     const setLLMConfig = useAppStore(state => state.setLLMConfig);
     const setShowSettings = useAppStore(state => state.setShowSettings);
-    const setAnalysisResult = useAppStore(state => state.setAnalysisResult);
+    const setCardAnalysis = useAppStore(state => state.setCardAnalysis);
     const setIsAnalyzing = useAppStore(state => state.setIsAnalyzing);
     const setAnalysisError = useAppStore(state => state.setAnalysisError);
-    const cacheAnalysis = useAppStore(state => state.cacheAnalysis);
-    const analysisCache = useAppStore(state => state.analysisCache);
+    const getCard = useAppStore(state => state.getCard);
 
     // New deck analysis state
     const deckAnalysisCache = useAppStore(state => state.deckAnalysisCache);
@@ -70,19 +67,86 @@ function App() {
     const redo = useAppStore(state => state.redo);
     const canUndo = useAppStore(state => state.canUndo);
     const canRedo = useAppStore(state => state.canRedo);
-    const fileName = useAppStore(state => state.fileName);
-    const loadCachedAnalysesForDeck = useAppStore(state => state.loadCachedAnalysesForDeck);
-    const loadDeckState = useAppStore(state => state.loadDeckState);
 
-    // Card editing - subscribe to editedCards map directly to trigger re-renders on changes
+    // Card editing
     const updateCardFields = useAppStore(state => state.updateCardFields);
-    const editedCards = useAppStore(state => state.editedCards);
-    const restoreCardEdits = useAppStore(state => state.restoreCardEdits);
+    const restoreCardFields = useAppStore(state => state.restoreCardFields);
+    
+    // Compute derived state - selectedCard from cards Map
+    const selectedCard = useMemo(() => {
+        if (!selectedCardId) return null;
+        const cardState = cards.get(selectedCardId);
+        if (!cardState) return null;
+        // Convert CardStateData to RenderedCard-like object for CardViewer
+        return {
+            id: cardState.cardId,
+            noteId: cardState.noteId,
+            deckId: cardState.deckId,
+            type: cardState.type,
+            front: cardState.front,
+            back: cardState.back,
+            css: cardState.css,
+            tags: cardState.tags,
+            fields: cardState.currentFields,
+            modelName: cardState.modelName,
+            deckName: cardState.deckName,
+            queue: cardState.scheduling?.queue ?? 0,
+            due: cardState.scheduling?.due ?? 0,
+            interval: cardState.scheduling?.interval ?? 0,
+            factor: cardState.scheduling?.factor ?? 2500,
+            reps: cardState.scheduling?.reps ?? 0,
+            lapses: cardState.scheduling?.lapses ?? 0,
+            cardCreated: 0,
+            firstReview: null,
+            lastReview: null,
+            totalTime: 0,
+            reviewHistory: [],
+        } as RenderedCard;
+    }, [selectedCardId, cards]);
+    
+    // Compute analysisResult from selected card
+    const analysisResult = useMemo(() => {
+        if (!selectedCardId) return null;
+        return cards.get(selectedCardId)?.analysis ?? null;
+    }, [selectedCardId, cards]);
+    
+    // Compute analysisCache as Map for functions that need it
+    const analysisCache = useMemo(() => {
+        const cache = new Map<number, LLMAnalysisResult>();
+        for (const [cardId, cardState] of cards) {
+            if (cardState.analysis) {
+                cache.set(cardId, cardState.analysis);
+            }
+        }
+        return cache;
+    }, [cards]);
+    
+    // Compute which cards are edited for this card
+    const selectedCardEdited = useMemo(() => {
+        if (!selectedCardId) return { isEdited: false, editedFields: undefined };
+        const cardState = cards.get(selectedCardId);
+        if (!cardState) return { isEdited: false, editedFields: undefined };
+        const card = getCard(selectedCardId);
+        return {
+            isEdited: card?.isEdited ?? false,
+            editedFields: card?.isEdited ? cardState.currentFields : undefined,
+        };
+    }, [selectedCardId, cards, getCard]);
+    
+    // Compute markedForDeletion as Set for export
+    const markedForDeletion = useMemo(() => {
+        const set = new Set<number>();
+        for (const [cardId, cardState] of cards) {
+            if (cardState.isDeleted) {
+                set.add(cardId);
+            }
+        }
+        return set;
+    }, [cards]);
 
     const [additionalPrompt, setAdditionalPrompt] = useState('');
     const [deckAdditionalPrompt, setDeckAdditionalPrompt] = useState('');
     const [showPromptUpdateModal, setShowPromptUpdateModal] = useState(false);
-    const [cacheLoadedForFile, setCacheLoadedForFile] = useState<string | null>(null);
     // Track which deck has the add card panel open (null = closed)
     const [addCardPanelDeckId, setAddCardPanelDeckId] = useState<number | null>(null);
 
@@ -132,39 +196,8 @@ function App() {
         }
     }, []); // Only run on mount
 
-    // Load cached analyses when a new file is loaded
-    useEffect(() => {
-        if (!collection || !fileName || cacheLoadedForFile === fileName) return;
-
-        // Render all cards to get their fields for hash verification
-        const loadCachedData = async () => {
-            const allCards = Array.from(collection.cards.values());
-            const cardsWithFields: Array<{ id: number; fields: { name: string; value: string }[]; deckName: string }> = [];
-
-            // Render cards in batches to avoid blocking
-            for (const card of allCards) {
-                try {
-                    const rendered = await renderCard(collection, card);
-                    cardsWithFields.push({ id: card.id, fields: rendered.fields, deckName: rendered.deckName });
-                } catch (e) {
-                    // Skip cards that fail to render
-                }
-            }
-
-            // Load valid cached results
-            const loadedCount = loadCachedAnalysesForDeck(cardsWithFields);
-            if (loadedCount > 0) {
-                console.log(`Loaded ${loadedCount} cached analyses for ${fileName}`);
-            }
-
-            // Load deck state (generated cards, marked for deletion)
-            loadDeckState();
-
-            setCacheLoadedForFile(fileName);
-        };
-
-        loadCachedData();
-    }, [collection, fileName, cacheLoadedForFile, loadCachedAnalysesForDeck, loadDeckState]);
+    // Note: Cache loading is now handled atomically in setCollection()
+    // No separate useEffect needed - this eliminates race conditions
 
     const handleAcceptNewPrompt = () => {
         setLLMConfig({
@@ -193,15 +226,15 @@ function App() {
         if (deckAnalysisResult) return deckAnalysisResult;
 
         // Otherwise, compute stats from individual card analyses
-        const cards = getCardsInDeck(collection, selectedDeckId, true);
-        if (cards.length === 0) return null;
+        const deckCards = getCardsInDeck(collection, selectedDeckId, true);
+        if (deckCards.length === 0) return null;
 
-        const analyzedCards: { cardId: number; score: number; issues: string[]; suggestions: number }[] = [];
+        const analyzedCardsData: { cardId: number; score: number; issues: string[]; suggestions: number }[] = [];
 
-        for (const card of cards) {
+        for (const card of deckCards) {
             const cached = analysisCache.get(card.id);
             if (cached) {
-                analyzedCards.push({
+                analyzedCardsData.push({
                     cardId: card.id,
                     score: cached.feedback.overallScore,
                     issues: cached.feedback.issues,
@@ -215,23 +248,23 @@ function App() {
         for (let s = 1; s <= 10; s++) {
             scoreDistribution.push({
                 score: s,
-                count: analyzedCards.filter(a => Math.floor(a.score) === s).length
+                count: analyzedCardsData.filter(a => Math.floor(a.score) === s).length
             });
         }
 
-        const avgScore = analyzedCards.length > 0
-            ? analyzedCards.reduce((sum, a) => sum + a.score, 0) / analyzedCards.length
+        const avgScore = analyzedCardsData.length > 0
+            ? analyzedCardsData.reduce((sum, a) => sum + a.score, 0) / analyzedCardsData.length
             : 0;
-        const totalSuggestions = analyzedCards.reduce((sum, a) => sum + a.suggestions, 0);
+        const totalSuggestions = analyzedCardsData.reduce((sum, a) => sum + a.suggestions, 0);
 
         const deck = collection.decks.get(selectedDeckId);
 
         return {
             deckId: selectedDeckId,
             deckName: deck?.name || 'Unknown Deck',
-            totalCards: cards.length,
-            analyzedCards: analyzedCards.length,
-            averageScore: analyzedCards.length > 0 ? Math.round(avgScore * 10) / 10 : 0,
+            totalCards: deckCards.length,
+            analyzedCards: analyzedCardsData.length,
+            averageScore: analyzedCardsData.length > 0 ? Math.round(avgScore * 10) / 10 : 0,
             scoreDistribution,
             knowledgeCoverage: null,
             deckSummary: '',
@@ -254,14 +287,13 @@ function App() {
 
         try {
             const result = await analyzeCard(selectedCard, llmConfig, additionalPrompt);
-            setAnalysisResult(result);
-            cacheAnalysis(selectedCardId, result, selectedCard.fields, selectedCard.deckName);
+            setCardAnalysis(selectedCardId, result);
         } catch (error) {
             console.error('Analysis failed:', error);
             const errorMessage = error instanceof Error ? error.message : 'Analysis failed';
             setAnalysisError(errorMessage);
             // Cache the error so it shows in the card list
-            cacheAnalysis(selectedCardId, {
+            setCardAnalysis(selectedCardId, {
                 feedback: {
                     isUnambiguous: false,
                     isAtomic: false,
@@ -275,11 +307,11 @@ function App() {
                 suggestedCards: [],
                 deleteOriginal: false,
                 error: errorMessage
-            }, selectedCard.fields, selectedCard.deckName);
+            });
         } finally {
             setIsAnalyzing(false);
         }
-    }, [selectedCard, selectedCardId, llmConfig, additionalPrompt, setAnalysisResult, setIsAnalyzing, setAnalysisError, cacheAnalysis]);
+    }, [selectedCard, selectedCardId, llmConfig, additionalPrompt, setCardAnalysis, setIsAnalyzing, setAnalysisError]);
 
     // Analyze individual cards in the deck (LLM processing)
     const handleAnalyzeCards = useCallback(async () => {
@@ -299,26 +331,26 @@ function App() {
         const deck = collection.decks.get(selectedDeckId);
         if (!deck) return;
 
-        const cards = getCardsInDeck(collection, selectedDeckId, true);
-        if (cards.length === 0) {
+        const deckCards = getCardsInDeck(collection, selectedDeckId, true);
+        if (deckCards.length === 0) {
             setAnalysisError('No cards in this deck to analyze.');
             return;
         }
 
         resetDeckAnalysisCancelled();
         setAnalyzingDeckId(selectedDeckId);
-        setDeckAnalysisProgress({ current: 0, total: Math.min(cards.length, llmConfig.maxDeckAnalysisCards) });
+        setDeckAnalysisProgress({ current: 0, total: Math.min(deckCards.length, llmConfig.maxDeckAnalysisCards) });
         setAnalysisError(null);
 
         try {
             const { error } = await analyzeCardsInDeck(
                 collection,
-                cards,
+                deckCards,
                 llmConfig,
-                (current, total, cardId, cardResult, fields, deckName) => {
+                (current, total, cardId, cardResult) => {
                     setDeckAnalysisProgress({ current, total });
                     if (cardId && cardResult) {
-                        cacheAnalysis(cardId, cardResult, fields, deckName);
+                        setCardAnalysis(cardId, cardResult);
                     }
                 },
                 isDeckAnalysisCancelled,
@@ -338,7 +370,7 @@ function App() {
             setAnalyzingDeckId(null);
             setDeckAnalysisProgress(null);
         }
-    }, [collection, selectedDeckId, analyzingDeckId, llmConfig, setAnalyzingDeckId, setDeckAnalysisProgress, setAnalysisError, cacheAnalysis, isDeckAnalysisCancelled, resetDeckAnalysisCancelled, analysisCache]);
+    }, [collection, selectedDeckId, analyzingDeckId, llmConfig, setAnalyzingDeckId, setDeckAnalysisProgress, setAnalysisError, setCardAnalysis, isDeckAnalysisCancelled, resetDeckAnalysisCancelled, analysisCache]);
 
     // Generate deck insights from already-analyzed cards
     const handleGenerateDeckInsights = useCallback(async () => {
@@ -352,8 +384,8 @@ function App() {
         const deck = collection.decks.get(selectedDeckId);
         if (!deck) return;
 
-        const cards = getCardsInDeck(collection, selectedDeckId, true);
-        const cardIds = cards.map(c => c.id);
+        const deckCards = getCardsInDeck(collection, selectedDeckId, true);
+        const cardIds = deckCards.map(c => c.id);
 
         // Check if we have any analyzed cards
         const analyzedCount = cardIds.filter(id => analysisCache.has(id) && !analysisCache.get(id)?.error).length;
@@ -368,13 +400,13 @@ function App() {
         try {
             const result = await generateDeckInsights(
                 deck,
-                cards.length,
+                deckCards.length,
                 analysisCache,
                 cardIds,
                 llmConfig,
                 deckAdditionalPrompt,
                 collection,
-                cards
+                deckCards
             );
 
             cacheDeckAnalysis(selectedDeckId, result);
@@ -389,8 +421,6 @@ function App() {
     const handleStopDeckAnalysis = useCallback(() => {
         cancelDeckAnalysis();
     }, [cancelDeckAnalysis]);
-
-    const markedForDeletion = useAppStore(state => state.markedForDeletion);
 
     const handleExport = useCallback(async () => {
         if (!collection) return;
@@ -518,9 +548,9 @@ function App() {
                                                 card={selectedCard}
                                                 title="Original Card"
                                                 onUpdateFields={updateCardFields}
-                                                editedFields={editedCards.get(selectedCard.noteId)}
-                                                isEdited={editedCards.has(selectedCard.noteId)}
-                                                onRestoreEdits={restoreCardEdits}
+                                                editedFields={selectedCardEdited.editedFields}
+                                                isEdited={selectedCardEdited.isEdited}
+                                                onRestoreEdits={restoreCardFields}
                                             />
                                         </div>
 

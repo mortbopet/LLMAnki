@@ -134,7 +134,7 @@ const KnowledgeCoverageSection: React.FC<{ coverage: KnowledgeCoverage }> = ({ c
 };
 
 export const DeckAnalysisPanel: React.FC<DeckAnalysisPanelProps> = ({ result }) => {
-    const addCardToDeck = useAppStore(state => state.addCardToDeck);
+    const addCard = useAppStore(state => state.addCard);
     const selectedDeckId = useAppStore(state => state.selectedDeckId);
     const llmConfig = useAppStore(state => state.llmConfig);
     const markDeckSuggestedCardAdded = useAppStore(state => state.markDeckSuggestedCardAdded);
@@ -145,9 +145,9 @@ export const DeckAnalysisPanel: React.FC<DeckAnalysisPanelProps> = ({ result }) 
     // Track which cards have been added
     const addedIndices = result.addedSuggestedCardIndices || [];
 
-    const handleAddCard = (card: SuggestedCard, index: number) => {
+    const handleAddCard = async (card: SuggestedCard, index: number) => {
         if (selectedDeckId !== null) {
-            addCardToDeck(card, selectedDeckId);
+            await addCard(card, selectedDeckId);
             // Mark this card as added in the cache
             markDeckSuggestedCardAdded(result.deckId, index);
         }

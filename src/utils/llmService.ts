@@ -135,30 +135,6 @@ function classifyError(
   return { type: 'unknown' };
 }
 
-/**
- * Check if Ollama is running and available
- */
-export async function checkOllamaStatus(): Promise<{ 
-  available: boolean; 
-  models: string[];
-  error?: string;
-}> {
-  try {
-    const ollama = new Ollama({ host: 'http://localhost:11434' });
-    const response = await ollama.list();
-    return { 
-      available: true, 
-      models: response.models.map(m => m.name)
-    };
-  } catch (e) {
-    return { 
-      available: false, 
-      models: [],
-      error: e instanceof Error ? e.message : 'Cannot connect to Ollama'
-    };
-  }
-}
-
 export const PROVIDER_INFO: Record<string, ProviderInfo> = {
   openai: {
     description: 'OpenAI provides GPT-4 and GPT-3.5 models with strong reasoning and instruction-following capabilities.',

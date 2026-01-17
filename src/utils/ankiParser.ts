@@ -894,8 +894,3 @@ export function getCardsInDeck(collection: AnkiCollection, deckId: number, inclu
   
   return Array.from(collection.cards.values()).filter(card => targetDeckIds.has(card.deckId));
 }
-
-export function getDeckPath(collection: AnkiCollection, deckId: number): string {
-  const deck = collection.decks.get(deckId);
-  return deck?.name || 'Unknown Deck';
-}

@@ -162,33 +162,6 @@ export interface LLMAnalysisResult {
   error?: string;
 }
 
-// UI State
-export interface UndoableAction {
-  type: 'add-card' | 'delete-card';
-  // For add-card: the card and note that were added
-  cardId?: number;
-  noteId?: number;
-  card?: AnkiCard;
-  note?: AnkiNote;
-  // For delete-card: the card and note that were deleted
-  deletedCard?: AnkiCard;
-  deletedNote?: AnkiNote;
-  deckId: number;
-}
-
-export interface CardChange {
-  type: 'add' | 'delete' | 'modify';
-  originalCardId?: number;
-  newCard?: SuggestedCard;
-  committed: boolean;
-}
-
-export interface AppSettings {
-  llmConfig: LLMConfig;
-  autoSave: boolean;
-  showAdvancedOptions: boolean;
-}
-
 // Knowledge coverage analysis for a deck
 export interface KnowledgeCoverage {
   overallCoverage: 'excellent' | 'good' | 'fair' | 'poor';

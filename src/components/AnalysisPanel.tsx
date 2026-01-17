@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import {
     CheckCircle,
     XCircle,
@@ -37,16 +37,15 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ result }) => {
     const suggestedCardsState = useAppStore(state => state.suggestedCards);
     const updateSuggestedCard = useAppStore(state => state.updateSuggestedCard);
     const removeSuggestedCard = useAppStore(state => state.removeSuggestedCard);
-    const addCardToDeck = useAppStore(state => state.addCardToDeck);
-    const markCardForDeletion = useAppStore(state => state.markCardForDeletion);
-    const unmarkCardForDeletion = useAppStore(state => state.unmarkCardForDeletion);
-    const isCardMarkedForDeletion = useAppStore(state => state.isCardMarkedForDeletion);
+    const addCard = useAppStore(state => state.addCard);
     const getAddedSuggestedIndices = useAppStore(state => state.getAddedSuggestedIndices);
     const getAddedCardId = useAppStore(state => state.getAddedCardId);
     const deleteCard = useAppStore(state => state.deleteCard);
-    const selectedCard = useAppStore(state => state.selectedCard);
+    const restoreCard = useAppStore(state => state.restoreCard);
+    const selectedCardId = useAppStore(state => state.selectedCardId);
     const selectedDeckId = useAppStore(state => state.selectedDeckId);
     const llmConfig = useAppStore(state => state.llmConfig);
+    const cards = useAppStore(state => state.cards);
 
     // Track carousel position to persist across edit/save cycles
     const [carouselIndex, setCarouselIndex] = useState(0);
@@ -54,18 +53,33 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ result }) => {
     // Get layout preference (default to carousel for backwards compatibility)
     const suggestedCardsLayout = llmConfig.suggestedCardsLayout || 'carousel';
 
+    // Compute selectedCard and deletion state from cards Map
+    const selectedCard = useMemo(() => {
+        if (!selectedCardId) return null;
+        const cardState = cards.get(selectedCardId);
+        if (!cardState) return null;
+        return { id: cardState.cardId };
+    }, [selectedCardId, cards]);
+    
+    const isCurrentCardMarked = useMemo(() => {
+        if (!selectedCardId) return false;
+        return cards.get(selectedCardId)?.isDeleted ?? false;
+    }, [selectedCardId, cards]);
+
     // Get indices of suggested cards that have already been added
     const addedIndices = selectedCard ? getAddedSuggestedIndices(selectedCard.id) : [];
+
+    // Handle inline updates to suggested cards
 
     // Handle inline updates to suggested cards
     const handleUpdateCard = useCallback((index: number, card: SuggestedCard) => {
         updateSuggestedCard(index, card);
     }, [updateSuggestedCard]);
 
-    const handleAddCard = (card: SuggestedCard, index: number) => {
+    const handleAddCard = async (card: SuggestedCard, index: number) => {
         if (selectedDeckId !== null) {
             // Pass the selected card ID for potential metadata inheritance, and the suggested card index
-            addCardToDeck(card, selectedDeckId, selectedCard?.id, index);
+            await addCard(card, selectedDeckId, selectedCard?.id, index);
         }
     };
 
@@ -80,16 +94,13 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ result }) => {
 
     const handleToggleDeleteMark = () => {
         if (selectedCard) {
-            if (isCardMarkedForDeletion(selectedCard.id)) {
-                unmarkCardForDeletion(selectedCard.id);
+            if (isCurrentCardMarked) {
+                restoreCard(selectedCard.id);
             } else {
-                markCardForDeletion(selectedCard.id);
+                deleteCard(selectedCard.id);
             }
         }
     };
-
-    // Check if the current card is marked for deletion
-    const isCurrentCardMarked = selectedCard ? isCardMarkedForDeletion(selectedCard.id) : false;
 
     // Use local suggestedCards state which can be edited
     const displayCards = suggestedCardsState.length > 0 ? suggestedCardsState : suggestedCards;

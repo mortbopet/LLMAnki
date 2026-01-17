@@ -177,14 +177,30 @@ export const CardList: React.FC = () => {
     const selectedDeckId = useAppStore(state => state.selectedDeckId);
     const selectedCardId = useAppStore(state => state.selectedCardId);
     const selectCard = useAppStore(state => state.selectCard);
-    const analysisCache = useAppStore(state => state.analysisCache);
-    const isGeneratedCard = useAppStore(state => state.isGeneratedCard);
-    const isCardMarkedForDeletion = useAppStore(state => state.isCardMarkedForDeletion);
-    const markCardForDeletion = useAppStore(state => state.markCardForDeletion);
-    const unmarkCardForDeletion = useAppStore(state => state.unmarkCardForDeletion);
+    const cards = useAppStore(state => state.cards);
+    const persistedCardState = useAppStore(state => state.persistedCardState);
     const deleteCard = useAppStore(state => state.deleteCard);
-    const isCardEdited = useAppStore(state => state.isCardEdited);
-    const restoreCardEdits = useAppStore(state => state.restoreCardEdits);
+    const restoreCard = useAppStore(state => state.restoreCard);
+    const restoreCardFields = useAppStore(state => state.restoreCardFields);
+    const getCard = useAppStore(state => state.getCard);
+
+    // Compute analysisCache from both cards Map and persistedCardState
+    const analysisCache = useMemo(() => {
+        const cache = new Map<number, LLMAnalysisResult>();
+        // First add from cards Map (active state)
+        for (const [cardId, cardState] of cards) {
+            if (cardState.analysis) {
+                cache.set(cardId, cardState.analysis);
+            }
+        }
+        // Then add from persisted state (for cards not yet loaded)
+        for (const [cardId, savedCard] of persistedCardState) {
+            if (!cache.has(cardId) && savedCard.analysis) {
+                cache.set(cardId, savedCard.analysis);
+            }
+        }
+        return cache;
+    }, [cards, persistedCardState]);
 
     const parentRef = useRef<HTMLDivElement>(null);
     const [renderedCards, setRenderedCards] = React.useState<Map<number, RenderedCard>>(new Map());
@@ -201,8 +217,8 @@ export const CardList: React.FC = () => {
 
     // Count generated cards in the current deck
     const generatedCardCount = useMemo(() => {
-        return allCards.filter(card => isGeneratedCard(card.id)).length;
-    }, [allCards, isGeneratedCard]);
+        return allCards.filter(card => cards.get(card.id)?.origin === 'generated').length;
+    }, [allCards, cards]);
 
     // Filter cards based on search query
     const filteredCards = useMemo(() => {
@@ -219,7 +235,7 @@ export const CardList: React.FC = () => {
     }, [allCards, searchQuery, renderedCards]);
 
     // Sort cards based on sort option
-    const cards = useMemo(() => {
+    const sortedCards = useMemo(() => {
         if (sortBy === 'default') return filteredCards;
 
         return [...filteredCards].sort((a, b) => {
@@ -232,8 +248,9 @@ export const CardList: React.FC = () => {
             if (sortBy === 'state') {
                 // Priority: deleted (0) > new (1) > existing (2)
                 const getStatePriority = (cardId: number) => {
-                    if (isCardMarkedForDeletion(cardId)) return 0;
-                    if (isGeneratedCard(cardId)) return 1;
+                    const cardState = cards.get(cardId);
+                    if (cardState?.isDeleted) return 0;
+                    if (cardState?.origin === 'generated') return 1;
                     return 2;
                 };
                 return getStatePriority(a.id) - getStatePriority(b.id);
@@ -241,11 +258,11 @@ export const CardList: React.FC = () => {
 
             return 0;
         });
-    }, [filteredCards, sortBy, analysisCache, isCardMarkedForDeletion, isGeneratedCard]);
+    }, [filteredCards, sortBy, analysisCache, cards]);
 
     // Virtualizer for efficient rendering of large lists
     const rowVirtualizer = useVirtualizer({
-        count: cards.length,
+        count: sortedCards.length,
         getScrollElement: () => parentRef.current,
         estimateSize: () => 72, // Initial estimate, will be measured dynamically
         overscan: 5, // Render 5 extra items above and below viewport
@@ -289,7 +306,8 @@ export const CardList: React.FC = () => {
             if (!rendered) {
                 rendered = await renderCard(collection, card);
             }
-            selectCard(card.id, rendered);
+            // selectCard now only needs the cardId - rendered content is stored separately
+            selectCard(card.id);
         } catch (e) {
             console.error('Failed to select card:', e);
         }
@@ -402,8 +420,8 @@ export const CardList: React.FC = () => {
             {/* Cards header */}
             <div className="px-2 py-1.5 text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center justify-between">
                 <span>
-                    Cards ({cards.length}
-                    {allCards.length !== cards.length ? ` of ${allCards.length}` : ''}
+                    Cards ({sortedCards.length}
+                    {allCards.length !== sortedCards.length ? ` of ${allCards.length}` : ''}
                     {generatedCardCount > 0 ? ` • ${generatedCardCount} new` : ''})
                 </span>
             </div>
@@ -416,7 +434,7 @@ export const CardList: React.FC = () => {
             )}
 
             {/* Empty state */}
-            {!isLoading && cards.length === 0 && (
+            {!isLoading && sortedCards.length === 0 && (
                 <div className="flex flex-col items-center justify-center flex-1 text-gray-400 p-4">
                     <CreditCard className="w-12 h-12 mb-2 opacity-50" />
                     <p className="text-sm text-center">
@@ -438,7 +456,15 @@ export const CardList: React.FC = () => {
                     }}
                 >
                     {rowVirtualizer.getVirtualItems().map((virtualItem) => {
-                        const card = cards[virtualItem.index];
+                        const card = sortedCards[virtualItem.index];
+                        const cardState = cards.get(card.id);
+                        const persistedState = persistedCardState.get(card.id);
+                        const domainCard = getCard(card.id);
+                        
+                        // Use cardState if available, otherwise fall back to persistedState
+                        const isDeleted = cardState?.isDeleted ?? persistedState?.isDeleted ?? false;
+                        const isGenerated = cardState?.origin === 'generated' || persistedState?.origin === 'generated';
+                        
                         return (
                             <div
                                 key={card.id}
@@ -458,14 +484,14 @@ export const CardList: React.FC = () => {
                                     isSelected={selectedCardId === card.id}
                                     isAnalyzed={analysisCache.has(card.id)}
                                     cachedResult={analysisCache.get(card.id)}
-                                    isGenerated={isGeneratedCard(card.id)}
-                                    isMarkedForDeletion={isCardMarkedForDeletion(card.id)}
-                                    isEdited={isCardEdited(card.noteId)}
+                                    isGenerated={isGenerated}
+                                    isMarkedForDeletion={isDeleted}
+                                    isEdited={domainCard?.isEdited ?? false}
                                     onSelect={() => handleSelectCard(card)}
-                                    onMarkForDeletion={markCardForDeletion}
-                                    onUnmarkForDeletion={unmarkCardForDeletion}
+                                    onMarkForDeletion={deleteCard}
+                                    onUnmarkForDeletion={restoreCard}
                                     onDeleteCard={deleteCard}
-                                    onRestoreEdits={restoreCardEdits}
+                                    onRestoreEdits={restoreCardFields}
                                 />
                             </div>
                         );

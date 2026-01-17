@@ -28,24 +28,14 @@ const CARD_TYPES: { value: CardType; label: string; fields: string[] }[] = [
  */
 export const AddCardPanel: React.FC<AddCardPanelProps> = ({ deckId, deckName, onClose }) => {
     // Store actions
-    const addCardToDeck = useAppStore(state => state.addCardToDeck);
+    const addCard = useAppStore(state => state.addCard);
     const deleteCard = useAppStore(state => state.deleteCard);
     const llmConfig = useAppStore(state => state.llmConfig);
     const setAddCardPanelState = useAppStore(state => state.setAddCardPanelState);
+    const getAddCardPanelState = useAppStore(state => state.getAddCardPanelState);
 
-    // Subscribe to panel state from store - this properly subscribes to changes
-    const panelState = useAppStore(state => {
-        const stored = state.addCardPanelState.get(deckId);
-        return stored || {
-            activeTab: 'manual' as const,
-            aiPrompt: '',
-            suggestedCards: [],
-            addedCards: [] as Array<{ suggestedIndex: number; cardId: number }>,
-            carouselIndex: 0,
-            manualCardType: 'basic' as CardType,
-            manualFields: CARD_TYPES[0].fields.map(name => ({ name, value: '' })),
-        };
-    });
+    // Subscribe to panel state from store - use getAddCardPanelState which returns a stable reference
+    const panelState = useAppStore(state => state.addCardPanelState.get(deckId)) ?? getAddCardPanelState(deckId);
 
     // Destructure for convenience
     const {
@@ -99,14 +89,14 @@ export const AddCardPanel: React.FC<AddCardPanelProps> = ({ deckId, deckName, on
     }, [updateState]);
 
     // Add manual card
-    const handleAddManualCard = useCallback(() => {
+    const handleAddManualCard = useCallback(async () => {
         const card: SuggestedCard = {
             type: manualCardType,
             fields: manualFields,
             explanation: ''
         };
 
-        const newCardId = addCardToDeck(card, deckId);
+        const newCardId = await addCard(card, deckId);
         if (newCardId) {
             // Reset fields for next card
             const cardTypeConfig = CARD_TYPES.find(t => t.value === manualCardType);
@@ -116,7 +106,7 @@ export const AddCardPanel: React.FC<AddCardPanelProps> = ({ deckId, deckName, on
                 });
             }
         }
-    }, [manualCardType, manualFields, deckId, addCardToDeck, updateState]);
+    }, [manualCardType, manualFields, deckId, addCard, updateState]);
 
     // Generate cards with AI
     const handleGenerateCards = useCallback(async () => {
@@ -146,14 +136,14 @@ export const AddCardPanel: React.FC<AddCardPanelProps> = ({ deckId, deckName, on
     }, [aiPrompt, deckName, llmConfig, updateState]);
 
     // Add suggested card to deck
-    const handleAddSuggestedCard = useCallback((card: SuggestedCard, index: number) => {
-        const newCardId = addCardToDeck(card, deckId);
+    const handleAddSuggestedCard = useCallback(async (card: SuggestedCard, index: number) => {
+        const newCardId = await addCard(card, deckId);
         if (newCardId) {
             updateState({
                 addedCards: [...addedCards, { suggestedIndex: index, cardId: newCardId }],
             });
         }
-    }, [deckId, addCardToDeck, addedCards, updateState]);
+    }, [deckId, addCard, addedCards, updateState]);
 
     // Update suggested card (from inline editing)
     const handleUpdateCard = useCallback((index: number, card: SuggestedCard) => {
