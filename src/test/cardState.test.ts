@@ -939,6 +939,72 @@ describe('Persistence Integration Tests', () => {
     expect(reloadedCard?.deckId).toBe(deckId);
   });
 
+  it('persists inherited review data on generated cards across reload', async () => {
+    // Step 1: Load deck with a card that has review history
+    const now = Date.now();
+    const reviewHistory: ReviewLogEntry[] = [
+      { id: now - 172800000, cardId: 0, ease: 2, interval: 1, lastInterval: 0, factor: 2500, time: 5000, type: 0 },
+      { id: now - 86400000, cardId: 0, ease: 4, interval: 7, lastInterval: 1, factor: 2650, time: 3500, type: 1 },
+    ];
+    
+    loadMockCollectionWithReviewHistory([
+      { 
+        front: 'Source Card', 
+        back: 'Source Answer',
+        scheduling: { queue: 2, due: 500, interval: 7, factor: 2650, reps: 5, lapses: 1 },
+        reviewHistory: reviewHistory
+      },
+    ], fileName);
+    
+    // Enable inherit card metadata
+    useAppStore.getState().setLLMConfig({ inheritCardMetadata: true });
+    
+    const deckId = getFirstDeckId();
+    expect(deckId).not.toBeNull();
+    
+    const sourceCard = Array.from(useAppStore.getState().cards.values())[0];
+    expect(sourceCard.reviewData).not.toBeNull();
+    expect(sourceCard.reviewData?.reviewHistory.length).toBe(2);
+    
+    // Step 2: Add a new generated card that inherits from source
+    const suggestedCard = createMockSuggestedCard('Generated Question', 'Generated Answer');
+    const newCardId = await useAppStore.getState().addCard(suggestedCard, deckId!, sourceCard.cardId);
+    expect(newCardId).not.toBeNull();
+    
+    // Verify inherited review data BEFORE reload
+    const addedCard = useAppStore.getState().getCard(newCardId!);
+    expect(addedCard?.reviewData).not.toBeNull();
+    expect(addedCard?.reviewData?.reviewHistory.length).toBe(2);
+    expect(addedCard?.reviewData?.totalTime).toBe(8500);
+    
+    // Step 3: Persist state
+    useAppStore.getState().persistDeckState();
+    
+    // Step 4: Unload deck
+    unloadDeck();
+    expect(useAppStore.getState().cards.size).toBe(0);
+    
+    // Step 5: Reload deck
+    loadMockCollectionWithReviewHistory([
+      { 
+        front: 'Source Card', 
+        back: 'Source Answer',
+        scheduling: { queue: 2, due: 500, interval: 7, factor: 2650, reps: 5, lapses: 1 },
+        reviewHistory: reviewHistory
+      },
+    ], fileName);
+    
+    // Step 6: Verify inherited review data is still there AFTER reload
+    expect(useAppStore.getState().cards.size).toBe(2);
+    
+    const reloadedCard = useAppStore.getState().getCard(newCardId!);
+    expect(reloadedCard).not.toBeNull();
+    expect(reloadedCard?.origin).toBe('generated');
+    expect(reloadedCard?.reviewData).not.toBeNull();
+    expect(reloadedCard?.reviewData?.reviewHistory.length).toBe(2);
+    expect(reloadedCard?.reviewData?.totalTime).toBe(8500);
+  });
+
   it('persists edited generated cards across reload', async () => {
     // Load deck
     loadMockCollection(testCards, fileName);

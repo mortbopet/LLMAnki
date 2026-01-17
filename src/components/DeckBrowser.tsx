@@ -1,9 +1,67 @@
-import React, { useMemo, useRef, useCallback, useState } from 'react';
+import React, { useMemo, useRef, useCallback, useState, useEffect } from 'react';
 import { ChevronRight, ChevronDown, Folder, FolderOpen, CreditCard, Loader2, Plus, FolderPlus, MoreVertical, Trash2, Edit2, X, Check } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAppStore } from '../store/useAppStore';
 import { parseApkgFile } from '../utils/ankiParser';
 import type { AnkiDeck } from '../types';
+
+/** Inline input row for creating a new deck - styled like a regular deck item */
+interface NewDeckInputRowProps {
+    level: number;
+    placeholder: string;
+    onConfirm: (name: string) => void;
+    onCancel: () => void;
+}
+
+const NewDeckInputRow: React.FC<NewDeckInputRowProps> = ({ level, placeholder, onConfirm, onCancel }) => {
+    const [name, setName] = useState('');
+    const inputRef = useRef<HTMLInputElement>(null);
+
+    useEffect(() => {
+        inputRef.current?.focus();
+    }, []);
+
+    const handleKeyDown = (e: React.KeyboardEvent) => {
+        if (e.key === 'Enter' && name.trim()) {
+            onConfirm(name.trim());
+        } else if (e.key === 'Escape') {
+            onCancel();
+        }
+    };
+
+    return (
+        <div
+            className="group flex items-center gap-1 py-1 px-2 rounded bg-gray-800 border border-gray-600"
+            style={{ paddingLeft: `${level * 16 + 8}px` }}
+        >
+            <span className="w-5" /> {/* Spacer for chevron */}
+            <Folder className="w-4 h-4 text-green-500 flex-shrink-0" />
+            <input
+                ref={inputRef}
+                type="text"
+                value={name}
+                onChange={e => setName(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder={placeholder}
+                className="flex-1 min-w-0 px-1 py-0.5 text-sm bg-transparent border-none outline-none text-white placeholder-gray-500"
+            />
+            <button
+                onClick={() => name.trim() && onConfirm(name.trim())}
+                className="p-0.5 hover:bg-gray-600 rounded flex-shrink-0"
+                title="Create deck (Enter)"
+            >
+                <Check className="w-4 h-4 text-green-400" />
+            </button>
+            <button
+                onClick={onCancel}
+                className="p-0.5 hover:bg-gray-600 rounded flex-shrink-0"
+                title="Cancel (Escape)"
+            >
+                <X className="w-4 h-4 text-red-400" />
+            </button>
+        </div>
+    );
+};
 
 interface DeckNodeProps {
     deck: AnkiDeck;
@@ -14,9 +72,16 @@ interface DeckNodeProps {
     onDelete: (deckId: number) => void;
     onRename: (deckId: number, newName: string) => void;
     isGenerated: boolean;
+    /** ID of the deck under which we're creating a subdeck (null if not creating) */
+    creatingSubdeckUnder: number | null;
+    onConfirmSubdeck: (name: string) => void;
+    onCancelSubdeck: () => void;
 }
 
-const DeckNode: React.FC<DeckNodeProps> = ({ deck, level, expanded, onToggle, onCreateSubdeck, onDelete, onRename, isGenerated }) => {
+const DeckNode: React.FC<DeckNodeProps> = ({
+    deck, level, expanded, onToggle, onCreateSubdeck, onDelete, onRename, isGenerated,
+    creatingSubdeckUnder, onConfirmSubdeck, onCancelSubdeck
+}) => {
     const selectedDeckId = useAppStore(state => state.selectedDeckId);
     const selectDeck = useAppStore(state => state.selectDeck);
     const collection = useAppStore(state => state.collection);
@@ -209,8 +274,31 @@ const DeckNode: React.FC<DeckNodeProps> = ({ deck, level, expanded, onToggle, on
                             onDelete={onDelete}
                             onRename={onRename}
                             isGenerated={generatedDeckIds.has(child.id)}
+                            creatingSubdeckUnder={creatingSubdeckUnder}
+                            onConfirmSubdeck={onConfirmSubdeck}
+                            onCancelSubdeck={onCancelSubdeck}
                         />
                     ))}
+                    {/* Show inline input for creating subdeck under this expanded deck */}
+                    {creatingSubdeckUnder === deck.id && (
+                        <NewDeckInputRow
+                            level={level + 1}
+                            placeholder="New subdeck name..."
+                            onConfirm={onConfirmSubdeck}
+                            onCancel={onCancelSubdeck}
+                        />
+                    )}
+                </div>
+            )}
+            {/* Show inline input when the deck is not expanded but we're creating a subdeck under it */}
+            {!isExpanded && creatingSubdeckUnder === deck.id && (
+                <div>
+                    <NewDeckInputRow
+                        level={level + 1}
+                        placeholder="New subdeck name..."
+                        onConfirm={onConfirmSubdeck}
+                        onCancel={onCancelSubdeck}
+                    />
                 </div>
             )}
         </div>
@@ -231,7 +319,6 @@ export const DeckBrowser: React.FC = () => {
 
     const [expanded, setExpanded] = useState<Set<number>>(new Set());
     const [isCreatingDeck, setIsCreatingDeck] = useState(false);
-    const [newDeckName, setNewDeckName] = useState('');
     const [pendingSubdeckParent, setPendingSubdeckParent] = useState<number | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -264,28 +351,6 @@ export const DeckBrowser: React.FC = () => {
         fileInputRef.current?.click();
     };
 
-    const handleCreateDeck = () => {
-        if (!newDeckName.trim()) return;
-
-        if (pendingSubdeckParent !== null) {
-            const deckId = createSubdeck(pendingSubdeckParent, newDeckName.trim());
-            if (deckId) {
-                toast.success('Subdeck created', { description: newDeckName.trim() });
-                // Auto-expand parent
-                setExpanded(prev => new Set([...prev, pendingSubdeckParent]));
-            }
-        } else {
-            const deckId = createDeck(newDeckName.trim());
-            if (deckId) {
-                toast.success('Deck created', { description: newDeckName.trim() });
-            }
-        }
-
-        setNewDeckName('');
-        setIsCreatingDeck(false);
-        setPendingSubdeckParent(null);
-    };
-
     const handleStartCreateDeck = () => {
         if (!collection) {
             createEmptyCollection();
@@ -297,7 +362,32 @@ export const DeckBrowser: React.FC = () => {
     const handleStartCreateSubdeck = (parentId: number) => {
         setIsCreatingDeck(true);
         setPendingSubdeckParent(parentId);
-        setNewDeckName('');
+        // Auto-expand parent so the input is visible
+        setExpanded(prev => new Set([...prev, parentId]));
+    };
+
+    const handleConfirmCreate = (name: string) => {
+        if (!name.trim()) return;
+
+        if (pendingSubdeckParent !== null) {
+            const deckId = createSubdeck(pendingSubdeckParent, name.trim());
+            if (deckId) {
+                toast.success('Subdeck created', { description: name.trim() });
+            }
+        } else {
+            const deckId = createDeck(name.trim());
+            if (deckId) {
+                toast.success('Deck created', { description: name.trim() });
+            }
+        }
+
+        setIsCreatingDeck(false);
+        setPendingSubdeckParent(null);
+    };
+
+    const handleCancelCreate = () => {
+        setIsCreatingDeck(false);
+        setPendingSubdeckParent(null);
     };
 
     const handleDeleteDeck = (deckId: number) => {
@@ -392,48 +482,6 @@ export const DeckBrowser: React.FC = () => {
                     </button>
                 </div>
 
-                {isCreatingDeck && (
-                    <div className="mb-2 px-2">
-                        <div className="flex items-center gap-1 p-2 bg-gray-800 rounded border border-gray-700">
-                            <FolderPlus className="w-4 h-4 text-green-500" />
-                            <input
-                                type="text"
-                                value={newDeckName}
-                                onChange={e => setNewDeckName(e.target.value)}
-                                onKeyDown={e => {
-                                    if (e.key === 'Enter') handleCreateDeck();
-                                    if (e.key === 'Escape') {
-                                        setIsCreatingDeck(false);
-                                        setNewDeckName('');
-                                        setPendingSubdeckParent(null);
-                                    }
-                                }}
-                                placeholder={pendingSubdeckParent ? 'Subdeck name...' : 'Deck name...'}
-                                className="flex-1 px-1 py-0.5 text-sm bg-transparent border-none outline-none text-white placeholder-gray-500"
-                                autoFocus
-                            />
-                            <button onClick={handleCreateDeck} className="p-0.5 hover:bg-gray-600 rounded">
-                                <Check className="w-4 h-4 text-green-400" />
-                            </button>
-                            <button
-                                onClick={() => {
-                                    setIsCreatingDeck(false);
-                                    setNewDeckName('');
-                                    setPendingSubdeckParent(null);
-                                }}
-                                className="p-0.5 hover:bg-gray-600 rounded"
-                            >
-                                <X className="w-4 h-4 text-red-400" />
-                            </button>
-                        </div>
-                        {pendingSubdeckParent && (
-                            <p className="text-xs text-gray-500 mt-1 ml-6">
-                                Creating subdeck under: {collection.decks.get(pendingSubdeckParent)?.name.split('::').pop()}
-                            </p>
-                        )}
-                    </div>
-                )}
-
                 {collection.deckTree.map(deck => (
                     <DeckNode
                         key={deck.id}
@@ -445,8 +493,20 @@ export const DeckBrowser: React.FC = () => {
                         onDelete={handleDeleteDeck}
                         onRename={handleRenameDeck}
                         isGenerated={generatedDeckIds.has(deck.id)}
+                        creatingSubdeckUnder={pendingSubdeckParent}
+                        onConfirmSubdeck={handleConfirmCreate}
+                        onCancelSubdeck={handleCancelCreate}
                     />
                 ))}
+                {/* Inline input for creating a top-level deck (not subdeck) */}
+                {isCreatingDeck && pendingSubdeckParent === null && (
+                    <NewDeckInputRow
+                        level={0}
+                        placeholder="New deck name..."
+                        onConfirm={handleConfirmCreate}
+                        onCancel={handleCancelCreate}
+                    />
+                )}
             </div>
 
             <div className="p-2 border-t border-gray-700">

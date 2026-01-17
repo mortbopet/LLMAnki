@@ -127,6 +127,10 @@ export interface PersistedCardState {
   deckName?: string;
   /** Model CSS - for rendering generated cards */
   css?: string;
+  /** Scheduling data - for generated cards with inherited scheduling */
+  scheduling?: CardSchedulingData | null;
+  /** Review data - for generated cards with inherited review history */
+  reviewData?: CardReviewData | null;
 }
 
 /**

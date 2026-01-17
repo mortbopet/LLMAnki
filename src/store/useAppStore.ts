@@ -318,6 +318,9 @@ function savePersistedDeckState(
           type: cardState.type,
           deckName: cardState.deckName,
           css: cardState.css,
+          // Include scheduling and review data for generated cards
+          scheduling: cardState.origin === 'generated' ? cardState.scheduling : undefined,
+          reviewData: cardState.origin === 'generated' ? cardState.reviewData : undefined,
         });
       }
     }
@@ -538,8 +541,8 @@ export const useAppStore = create<AppStore>()(
                       deckName: deckName,
                       front: savedCard.currentFields[0]?.value || '',
                       back: savedCard.currentFields[1]?.value || '',
-                      scheduling: null,
-                      reviewData: null,
+                      scheduling: savedCard.scheduling ?? null,
+                      reviewData: savedCard.reviewData ?? null,
                     };
                     
                     // Add to cards state
