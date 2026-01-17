@@ -93,6 +93,10 @@ function createMockCollection(cardConfigs: (CardConfig | { front: string; back: 
       factor: scheduling?.factor ?? 2500,
       reps: scheduling?.reps ?? 0,
       lapses: scheduling?.lapses ?? 0,
+      left: 0,
+      odue: 0,
+      odid: 0,
+      flags: 0,
     });
     
     // Add review history if provided

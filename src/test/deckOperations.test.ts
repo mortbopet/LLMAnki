@@ -69,6 +69,10 @@ function createMockCollectionWithDecks(): AnkiCollection {
     factor: 2500,
     reps: 0,
     lapses: 0,
+    left: 0,
+    odue: 0,
+    odid: 0,
+    flags: 0,
   });
   
   return collection;

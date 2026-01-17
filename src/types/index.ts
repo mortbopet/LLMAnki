@@ -22,6 +22,14 @@ export interface AnkiCard {
   factor: number;
   reps: number;
   lapses: number;
+  /** Learning steps left: a*1000+b where a=reps today, b=reps till graduation */
+  left: number;
+  /** Original due date - used for filtered decks or scheduler migration */
+  odue: number;
+  /** Original deck ID - used when card is in a filtered deck */
+  odid: number;
+  /** Flags: value mod 8 gives color (0=none, 1=red, 2=orange, 3=green, 4=blue) */
+  flags: number;
 }
 
 // Review log entry from revlog table
@@ -48,10 +56,19 @@ export interface AnkiNote {
 export interface AnkiModel {
   id: number;
   name: string;
-  type: number; // 0 = standard, 1 = cloze
+  /** Model type: 0 = standard, 1 = cloze */
+  type: number;
   fields: AnkiField[];
   templates: AnkiTemplate[];
   css: string;
+  /** LaTeX preamble (usually \\documentclass...) */
+  latexPre: string;
+  /** LaTeX postamble (usually \\end{document}) */
+  latexPost: string;
+  /** Index of field used for sorting in browser (0-indexed) */
+  sortField: number;
+  /** Default deck ID for new cards of this model type */
+  did: number | null;
 }
 
 export interface AnkiField {
@@ -73,6 +90,10 @@ export interface AnkiDeck {
   description: string;
   parentId?: number;
   children: AnkiDeck[];
+  /** Whether this is a dynamic/filtered deck (1) or regular deck (0/undefined) */
+  dyn?: number;
+  /** ID of the deck options group from dconf (absent for filtered decks) */
+  conf?: number;
 }
 
 export interface AnkiCollection {

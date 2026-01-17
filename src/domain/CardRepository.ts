@@ -173,6 +173,10 @@ export async function createGeneratedCard(
     factor: shouldInherit ? sourceScheduling.factor : 2500,
     reps: shouldInherit ? sourceScheduling.reps : 0,
     lapses: shouldInherit ? sourceScheduling.lapses : 0,
+    left: 0,
+    odue: 0,
+    odid: 0,
+    flags: 0,
   };
   
   // Render content
@@ -252,6 +256,10 @@ export async function rerenderCardContent(
     factor: cardState.scheduling?.factor || 2500,
     reps: cardState.scheduling?.reps || 0,
     lapses: cardState.scheduling?.lapses || 0,
+    left: 0,
+    odue: 0,
+    odid: 0,
+    flags: 0,
   };
   
   const templates = model?.templates.map(t => ({

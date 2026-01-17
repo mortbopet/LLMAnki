@@ -95,6 +95,12 @@ export function resetIdCounter(seed?: number): void {
 // Default Model
 // ============================================================================
 
+/** Default LaTeX preamble per Anki specification */
+const DEFAULT_LATEX_PRE = '\\documentclass[12pt]{article}\n\\special{papersize=3in,5in}\n\\usepackage{amssymb,amsmath}\n\\pagestyle{empty}\n\\setlength{\\parindent}{0in}\n\\begin{document}';
+
+/** Default LaTeX postamble per Anki specification */
+const DEFAULT_LATEX_POST = '\\end{document}';
+
 /**
  * Create a default Basic model for new decks
  */
@@ -116,6 +122,10 @@ export function createDefaultModel(modelId: number): AnkiModel {
       },
     ],
     css: '.card { font-family: arial; font-size: 20px; text-align: center; color: black; background-color: white; }',
+    latexPre: DEFAULT_LATEX_PRE,
+    latexPost: DEFAULT_LATEX_POST,
+    sortField: 0,
+    did: null,
   };
 }
 
@@ -140,6 +150,10 @@ export function createClozeModel(modelId: number): AnkiModel {
       },
     ],
     css: '.card { font-family: arial; font-size: 20px; text-align: center; color: black; background-color: white; } .cloze { font-weight: bold; color: blue; }',
+    latexPre: DEFAULT_LATEX_PRE,
+    latexPost: DEFAULT_LATEX_POST,
+    sortField: 0,
+    did: null,
   };
 }
 
@@ -219,6 +233,8 @@ export class Deck {
       description: options.description || '',
       parentId: options.parentId,
       children: [],
+      dyn: 0,   // Regular deck (not filtered)
+      conf: 1,  // Default deck config
     };
     
     // Add to collection's decks Map
@@ -414,6 +430,10 @@ export class Deck {
       factor: shouldInherit ? sourceScheduling.factor : 2500,
       reps: shouldInherit ? sourceScheduling.reps : 0,
       lapses: shouldInherit ? sourceScheduling.lapses : 0,
+      left: 0,
+      odue: 0,
+      odid: 0,
+      flags: 0,
     };
     
     // Add to collection

@@ -352,6 +352,8 @@ export function restoreGeneratedDecks(
       description: deckInfo.description,
       parentId: deckInfo.parentId,
       children: [],
+      dyn: 0,   // Regular deck (not filtered)
+      conf: 1,  // Default deck config
     };
     
     collection.decks.set(deckInfo.deckId, ankiDeck);
