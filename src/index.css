@@ -255,6 +255,25 @@ html:not(.dark) svg line[stroke="#6B7280"] {
   @apply max-w-full h-auto my-2 rounded;
 }
 
+/* TipTap rich text field editor - proper image containment */
+.rich-text-field .ProseMirror {
+  @apply overflow-hidden;
+}
+
+.rich-text-field .ProseMirror img {
+  @apply max-w-full h-auto;
+}
+
+/* tiptap-extension-resize-image wrapper containment */
+.rich-text-field .ProseMirror .image-resizer,
+.rich-text-field .ProseMirror [data-type="image"] {
+  @apply max-w-full inline-block;
+}
+
+.rich-text-field .ProseMirror .image-resizer img {
+  @apply max-w-full h-auto block;
+}
+
 /* Tree view */
 .tree-item {
   @apply cursor-pointer rounded px-2 py-1 transition-colors;

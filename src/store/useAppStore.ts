@@ -78,17 +78,6 @@ const DEFAULT_ADD_CARD_PANEL_STATE: AddCardPanelState = {
   manualFields: [{ name: 'Front', value: '' }, { name: 'Back', value: '' }],
 };
 
-/** Undoable action for undo/redo system */
-interface UndoableAction {
-  type: 'add-card' | 'delete-card' | 'update-fields' | 'restore-fields';
-  cardId: number;
-  previousState?: CardStateData;
-  newState?: CardStateData;
-  // For add-card: also track the Anki entities for collection updates
-  ankiCard?: AnkiCard;
-  ankiNote?: AnkiNote;
-}
-
 /** Persistence key for deck state in localStorage */
 const DECK_STATE_PREFIX = 'llmanki-deck-state-';
 
@@ -114,10 +103,6 @@ interface AppState {
   // === Deck State ===
   /** IDs of decks created within the app (not from .apkg import) */
   generatedDeckIds: Set<number>;
-  
-  // === Undo/Redo ===
-  undoStack: UndoableAction[];
-  redoStack: UndoableAction[];
   
   // === Selection State ===
   selectedDeckId: number | null;
@@ -213,12 +198,6 @@ interface AppActions {
   // === Suggested Card Tracking ===
   getAddedSuggestedIndices: (sourceCardId: number) => number[];
   getAddedCardId: (sourceCardId: number, suggestedIndex: number) => number | null;
-  
-  // === Undo/Redo ===
-  undo: () => void;
-  redo: () => void;
-  canUndo: () => boolean;
-  canRedo: () => boolean;
   
   // === Persistence ===
   persistDeckState: () => void;
@@ -372,8 +351,6 @@ export const useAppStore = create<AppStore>()(
         addedSuggestedCards: new Map(),
         persistedCardState: new Map(),
         generatedDeckIds: new Set(),
-        undoStack: [],
-        redoStack: [],
         selectedDeckId: null,
         selectedCardId: null,
         isAnalyzing: false,
@@ -414,8 +391,6 @@ export const useAppStore = create<AppStore>()(
             state.persistedCardState = new Map();
             state.addedSuggestedCards = new Map();
             state.generatedDeckIds = new Set();
-            state.undoStack = [];
-            state.redoStack = [];
             state.suggestedCards = [];
             state.deckAnalysisCache = new Map();
             state.addCardPanelState = new Map();
@@ -631,8 +606,6 @@ export const useAppStore = create<AppStore>()(
             state.persistedCardState = new Map();
             state.addedSuggestedCards = new Map();
             state.generatedDeckIds = new Set();
-            state.undoStack = [];
-            state.redoStack = [];
             state.suggestedCards = [];
             state.deckAnalysisCache = new Map();
             state.addCardPanelState = new Map();
@@ -898,9 +871,6 @@ export const useAppStore = create<AppStore>()(
           
           if (!cardState || !collection) return;
           
-          // Store previous state for undo
-          const previousState = { ...cardState };
-          
           // Update fields
           let newCardState = withUpdatedFields(cardState, fields);
           
@@ -910,13 +880,6 @@ export const useAppStore = create<AppStore>()(
           
           set(draft => {
             draft.cards.set(cardId, newCardState);
-            draft.undoStack.push({
-              type: 'update-fields',
-              cardId,
-              previousState,
-              newState: newCardState,
-            });
-            draft.redoStack = [];
           });
           
           // Persist
@@ -929,18 +892,10 @@ export const useAppStore = create<AppStore>()(
           
           if (!cardState) return;
           
-          const previousState = { ...cardState };
           const newCardState = withRestoredFields(cardState);
           
           set(draft => {
             draft.cards.set(cardId, newCardState);
-            draft.undoStack.push({
-              type: 'restore-fields',
-              cardId,
-              previousState,
-              newState: newCardState,
-            });
-            draft.redoStack = [];
           });
           
           get().persistDeckState();
@@ -953,7 +908,6 @@ export const useAppStore = create<AppStore>()(
           
           if (!cardState || !collection) return;
           
-          const previousState = { ...cardState };
           const card = createCard(cardState);
           
           if (card.canHardDelete) {
@@ -992,13 +946,6 @@ export const useAppStore = create<AppStore>()(
                 draft.selectedCardId = null;
                 draft.suggestedCards = [];
               }
-              
-              draft.undoStack.push({
-                type: 'delete-card',
-                cardId,
-                previousState,
-              });
-              draft.redoStack = [];
             });
           } else {
             // Soft delete - mark as deleted
@@ -1006,13 +953,6 @@ export const useAppStore = create<AppStore>()(
             
             set(draft => {
               draft.cards.set(cardId, newCardState);
-              draft.undoStack.push({
-                type: 'delete-card',
-                cardId,
-                previousState,
-                newState: newCardState,
-              });
-              draft.redoStack = [];
             });
           }
           
@@ -1025,18 +965,10 @@ export const useAppStore = create<AppStore>()(
           
           if (!cardState || !cardState.isDeleted) return;
           
-          const previousState = { ...cardState };
           const newCardState = withDeleted(cardState, false);
           
           set(draft => {
             draft.cards.set(cardId, newCardState);
-            draft.undoStack.push({
-              type: 'delete-card',
-              cardId,
-              previousState,
-              newState: newCardState,
-            });
-            draft.redoStack = [];
           });
           
           get().persistDeckState();
@@ -1081,15 +1013,6 @@ export const useAppStore = create<AppStore>()(
                 { suggestedIndex, addedCardId: cardId },
               ]);
             }
-            
-            draft.undoStack.push({
-              type: 'add-card',
-              cardId,
-              newState: cardStateData,
-              ankiCard,
-              ankiNote: ankiNote as AnkiNote,
-            });
-            draft.redoStack = [];
           });
           
           get().persistDeckState();
@@ -1110,7 +1033,7 @@ export const useAppStore = create<AppStore>()(
           const inheritMetadata = state.llmConfig.inheritCardMetadata;
           
           // Use the Deck class to create the card
-          const { cardStateData, ankiCard, ankiNote } = await deck.createCard(front, back, {
+          const { cardStateData } = await deck.createCard(front, back, {
             type: options.type,
             tags: options.tags,
             sourceCard: sourceCard || undefined,
@@ -1124,15 +1047,6 @@ export const useAppStore = create<AppStore>()(
             draft.cards.set(cardId, cardStateData);
             
             // Note: ankiCard and ankiNote are already added to collection by deck.createCard()
-            
-            draft.undoStack.push({
-              type: 'add-card',
-              cardId,
-              newState: cardStateData,
-              ankiCard,
-              ankiNote,
-            });
-            draft.redoStack = [];
           });
           
           get().persistDeckState();
@@ -1300,110 +1214,6 @@ export const useAppStore = create<AppStore>()(
           const entry = entries.find(e => e.suggestedIndex === suggestedIndex);
           return entry?.addedCardId ?? null;
         },
-
-        // === Undo/Redo ===
-        undo: () => {
-          const state = get();
-          if (state.undoStack.length === 0) return;
-          
-          const action = state.undoStack[state.undoStack.length - 1];
-          
-          set(draft => {
-            draft.undoStack.pop();
-            draft.redoStack.push(action);
-            
-            if (action.previousState) {
-              // Restore previous state
-              if (action.type === 'delete-card' && !action.newState) {
-                // Was a hard delete - restore card
-                draft.cards.set(action.cardId, action.previousState);
-                if (action.ankiCard && action.ankiNote && draft.collection) {
-                  draft.collection.cards.set(action.ankiCard.id, action.ankiCard);
-                  draft.collection.notes.set(action.ankiNote.id, action.ankiNote);
-                }
-              } else {
-                draft.cards.set(action.cardId, action.previousState);
-              }
-            } else if (action.type === 'add-card') {
-              // Undo add - remove the card
-              draft.cards.delete(action.cardId);
-              if (draft.collection) {
-                draft.collection.cards.delete(action.cardId);
-                if (action.ankiNote) {
-                  draft.collection.notes.delete(action.ankiNote.id);
-                }
-              }
-              
-              // Remove from tracking
-              for (const [sourceId, entries] of draft.addedSuggestedCards) {
-                const filtered = entries.filter(e => e.addedCardId !== action.cardId);
-                if (filtered.length === 0) {
-                  draft.addedSuggestedCards.delete(sourceId);
-                } else if (filtered.length !== entries.length) {
-                  draft.addedSuggestedCards.set(sourceId, filtered);
-                }
-              }
-            }
-            
-            if (draft.selectedCardId === action.cardId) {
-              draft.selectedCardId = null;
-              draft.suggestedCards = [];
-            }
-          });
-          
-          get().persistDeckState();
-        },
-
-        redo: () => {
-          const state = get();
-          if (state.redoStack.length === 0) return;
-          
-          const action = state.redoStack[state.redoStack.length - 1];
-          
-          set(draft => {
-            draft.redoStack.pop();
-            draft.undoStack.push(action);
-            
-            if (action.newState) {
-              draft.cards.set(action.cardId, action.newState);
-            } else if (action.type === 'add-card' && action.ankiCard && action.ankiNote) {
-              // Redo add
-              if (action.newState) {
-                draft.cards.set(action.cardId, action.newState);
-              }
-              if (draft.collection) {
-                draft.collection.cards.set(action.ankiCard.id, action.ankiCard);
-                draft.collection.notes.set(action.ankiNote.id, action.ankiNote);
-              }
-            } else if (action.type === 'delete-card' && !action.newState) {
-              // Redo hard delete
-              draft.cards.delete(action.cardId);
-              if (draft.collection && action.previousState) {
-                draft.collection.cards.delete(action.cardId);
-                let noteUsed = false;
-                for (const c of draft.collection.cards.values()) {
-                  if (c.noteId === action.previousState.noteId) {
-                    noteUsed = true;
-                    break;
-                  }
-                }
-                if (!noteUsed) {
-                  draft.collection.notes.delete(action.previousState.noteId);
-                }
-              }
-            }
-            
-            if (draft.selectedCardId === action.cardId) {
-              draft.selectedCardId = null;
-              draft.suggestedCards = [];
-            }
-          });
-          
-          get().persistDeckState();
-        },
-
-        canUndo: () => get().undoStack.length > 0,
-        canRedo: () => get().redoStack.length > 0,
 
         // === Persistence ===
         persistDeckState: () => {

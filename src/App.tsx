@@ -9,8 +9,6 @@ import {
     Layers,
     StopCircle,
     Info,
-    Undo2,
-    Redo2,
     BarChart3,
     Plus
 } from 'lucide-react';
@@ -61,12 +59,6 @@ function App() {
     const cancelDeckAnalysis = useAppStore(state => state.cancelDeckAnalysis);
     const isDeckAnalysisCancelled = useAppStore(state => state.isDeckAnalysisCancelled);
     const resetDeckAnalysisCancelled = useAppStore(state => state.resetDeckAnalysisCancelled);
-
-    // Undo/Redo
-    const undo = useAppStore(state => state.undo);
-    const redo = useAppStore(state => state.redo);
-    const canUndo = useAppStore(state => state.canUndo);
-    const canRedo = useAppStore(state => state.canRedo);
 
     // Card editing
     const updateCardFields = useAppStore(state => state.updateCardFields);
@@ -152,29 +144,6 @@ function App() {
 
     // Show add card panel only if it's open for the current deck
     const showAddCardPanel = addCardPanelDeckId !== null && addCardPanelDeckId === selectedDeckId;
-
-    // Keyboard shortcuts for undo/redo
-    useEffect(() => {
-        const handleKeyDown = (e: KeyboardEvent) => {
-            // Check for Ctrl+Z (undo) or Ctrl+Shift+Z / Ctrl+Y (redo)
-            if (e.ctrlKey || e.metaKey) {
-                if (e.key === 'z' && !e.shiftKey) {
-                    e.preventDefault();
-                    if (canUndo()) {
-                        undo();
-                    }
-                } else if ((e.key === 'z' && e.shiftKey) || e.key === 'y') {
-                    e.preventDefault();
-                    if (canRedo()) {
-                        redo();
-                    }
-                }
-            }
-        };
-
-        window.addEventListener('keydown', handleKeyDown);
-        return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [undo, redo, canUndo, canRedo]);
 
     // Check for system prompt updates on mount
     useEffect(() => {
@@ -459,32 +428,6 @@ function App() {
 
                         {collection && (
                             <>
-                                {/* Undo/Redo buttons */}
-                                <div className={`flex items-center border-r pr-2 mr-1 ${isDarkMode ? 'border-gray-600' : 'border-gray-300'}`}>
-                                    <button
-                                        onClick={undo}
-                                        disabled={!canUndo()}
-                                        className={`p-2 rounded-lg transition-colors ${canUndo()
-                                            ? isDarkMode ? 'hover:bg-gray-700 text-gray-300' : 'hover:bg-gray-200 text-gray-600'
-                                            : isDarkMode ? 'text-gray-600 cursor-not-allowed' : 'text-gray-300 cursor-not-allowed'
-                                            }`}
-                                        title="Undo (Ctrl+Z)"
-                                    >
-                                        <Undo2 className="w-4 h-4" />
-                                    </button>
-                                    <button
-                                        onClick={redo}
-                                        disabled={!canRedo()}
-                                        className={`p-2 rounded-lg transition-colors ${canRedo()
-                                            ? isDarkMode ? 'hover:bg-gray-700 text-gray-300' : 'hover:bg-gray-200 text-gray-600'
-                                            : isDarkMode ? 'text-gray-600 cursor-not-allowed' : 'text-gray-300 cursor-not-allowed'
-                                            }`}
-                                        title="Redo (Ctrl+Y)"
-                                    >
-                                        <Redo2 className="w-4 h-4" />
-                                    </button>
-                                </div>
-
                                 <button
                                     onClick={handleExport}
                                     className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${isDarkMode ? 'bg-gray-700 hover:bg-gray-600' : 'bg-gray-200 hover:bg-gray-300'}`}

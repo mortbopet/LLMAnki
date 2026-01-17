@@ -5,7 +5,7 @@ import {
     LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Scatter, ScatterChart, ZAxis
 } from 'recharts';
 import type { RenderedCard, SuggestedCard, CardType, ReviewLogEntry } from '../types';
-import { getCardTypeName } from '../utils/cardRenderer';
+import { getCardTypeName, processMediaReferences } from '../utils/cardRenderer';
 import { useAppStore } from '../store/useAppStore';
 
 type ViewerTab = 'content' | 'scheduling' | 'history' | 'fields';
@@ -145,6 +145,7 @@ export const CardViewer: React.FC<CardViewerProps> = ({
     const [activeTab, setActiveTab] = useState<ViewerTab>('content');
     const [chartTab, setChartTab] = useState<ChartTab>('ease');
     const [localFields, setLocalFields] = useState<{ name: string; value: string }[]>([]);
+    const [processedLocalFields, setProcessedLocalFields] = useState<{ name: string; value: string }[]>([]);
     const [editedBadgeHovered, setEditedBadgeHovered] = useState(false);
 
     // For delete button functionality
@@ -152,6 +153,7 @@ export const CardViewer: React.FC<CardViewerProps> = ({
     const restoreCard = useAppStore(state => state.restoreCard);
     const cards = useAppStore(state => state.cards);
     const getCard = useAppStore(state => state.getCard);
+    const collection = useAppStore(state => state.collection);
 
     // Handle both RenderedCard and SuggestedCard formats
     const isRenderedCard = 'front' in card && 'back' in card;
@@ -239,6 +241,27 @@ export const CardViewer: React.FC<CardViewerProps> = ({
     useEffect(() => {
         setLocalFields(effectiveFields.map(f => ({ ...f })));
     }, [effectiveFields]);
+
+    // Process media references in fields for display
+    // This converts <img src="filename.png"> to data URLs
+    useEffect(() => {
+        const processFields = async () => {
+            if (!collection || localFields.length === 0) {
+                setProcessedLocalFields(localFields);
+                return;
+            }
+
+            const processed = await Promise.all(
+                localFields.map(async (field) => ({
+                    name: field.name,
+                    value: await processMediaReferences(field.value, collection.media)
+                }))
+            );
+            setProcessedLocalFields(processed);
+        };
+
+        processFields();
+    }, [localFields, collection]);
 
     // Handle field change
     const handleFieldChange = (index: number, newValue: string) => {
@@ -399,7 +422,7 @@ export const CardViewer: React.FC<CardViewerProps> = ({
 
                     {/* Editable Fields */}
                     <div className="p-4 space-y-4">
-                        {localFields.map((field, index) => (
+                        {processedLocalFields.map((field, index) => (
                             <RichTextField
                                 key={field.name}
                                 label={field.name}

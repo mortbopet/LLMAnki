@@ -414,8 +414,6 @@ describe('Store Actions', () => {
       cards: new Map(),
       persistedCardState: new Map(),
       addedSuggestedCards: new Map(),
-      undoStack: [],
-      redoStack: [],
       selectedDeckId: null,
       selectedCardId: null,
       isAnalyzing: false,
@@ -677,6 +675,162 @@ describe('Store Actions', () => {
       const card = useAppStore.getState().getCard(cardId);
       expect(card?.isEdited).toBe(false);
     });
+
+    it('marks card as edited when image dimensions change', async () => {
+      // Test that resizing an image (changing width/height attributes) marks the card as edited
+      const originalHtml = '<p>Question with image <img src="test.png" width="100" height="100"></p>';
+      const resizedHtml = '<p>Question with image <img src="test.png" width="200" height="200"></p>';
+      
+      loadMockCollection([{ front: originalHtml, back: 'Answer' }], 'Test.apkg');
+      const cards = Array.from(useAppStore.getState().cards.values());
+      const cardId = cards[0].cardId;
+
+      // Verify initial state - not edited
+      let card = useAppStore.getState().getCard(cardId);
+      expect(card?.isEdited).toBe(false);
+
+      // Update with resized image
+      const newFields: CardField[] = [
+        { name: 'Front', value: resizedHtml },
+        { name: 'Back', value: 'Answer' },
+      ];
+      await useAppStore.getState().updateCardFields(cardId, newFields);
+
+      // Should be marked as edited
+      card = useAppStore.getState().getCard(cardId);
+      expect(card?.isEdited).toBe(true);
+      expect(card?.fields[0].value).toBe(resizedHtml);
+    });
+
+    it('preserves image tags when updating text content', async () => {
+      // Test that editing text content doesn't corrupt or lose image tags
+      const imageDataUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+      const originalHtml = `<p>Question with image <img src="${imageDataUrl}" width="50" height="50"></p>`;
+      const editedHtml = `<p>Edited question with image <img src="${imageDataUrl}" width="50" height="50"></p>`;
+      
+      loadMockCollection([{ front: originalHtml, back: 'Answer' }], 'Test.apkg');
+      const cards = Array.from(useAppStore.getState().cards.values());
+      const cardId = cards[0].cardId;
+
+      // Update with edited text but same image
+      const newFields: CardField[] = [
+        { name: 'Front', value: editedHtml },
+        { name: 'Back', value: 'Answer' },
+      ];
+      await useAppStore.getState().updateCardFields(cardId, newFields);
+
+      const card = useAppStore.getState().getCard(cardId);
+      expect(card?.isEdited).toBe(true);
+      // Image tag should be preserved completely
+      expect(card?.fields[0].value).toContain(`<img src="${imageDataUrl}"`);
+      expect(card?.fields[0].value).toContain('width="50"');
+      expect(card?.fields[0].value).toContain('height="50"');
+    });
+
+    it('correctly detects no change when updating with same content', async () => {
+      const originalHtml = '<p>Question</p>';
+      
+      loadMockCollection([{ front: originalHtml, back: 'Answer' }], 'Test.apkg');
+      const cards = Array.from(useAppStore.getState().cards.values());
+      const cardId = cards[0].cardId;
+
+      // Update with same content
+      const sameFields: CardField[] = [
+        { name: 'Front', value: originalHtml },
+        { name: 'Back', value: 'Answer' },
+      ];
+      await useAppStore.getState().updateCardFields(cardId, sameFields);
+
+      // Should NOT be marked as edited since content is the same
+      const card = useAppStore.getState().getCard(cardId);
+      expect(card?.isEdited).toBe(false);
+    });
+
+    it('supports reverting edits to original content', async () => {
+      const originalHtml = '<p>Original question <img src="test.png" width="100"></p>';
+      const editedHtml = '<p>Edited question <img src="test.png" width="200"></p>';
+      
+      loadMockCollection([{ front: originalHtml, back: 'Original answer' }], 'Test.apkg');
+      const cards = Array.from(useAppStore.getState().cards.values());
+      const cardId = cards[0].cardId;
+
+      // Edit the card
+      await useAppStore.getState().updateCardFields(cardId, [
+        { name: 'Front', value: editedHtml },
+        { name: 'Back', value: 'Edited answer' },
+      ]);
+
+      // Verify edited
+      let card = useAppStore.getState().getCard(cardId);
+      expect(card?.isEdited).toBe(true);
+      expect(card?.fields[0].value).toBe(editedHtml);
+
+      // Revert
+      useAppStore.getState().restoreCardFields(cardId);
+
+      // Should be back to original
+      card = useAppStore.getState().getCard(cardId);
+      expect(card?.isEdited).toBe(false);
+      expect(card?.fields[0].value).toBe(originalHtml);
+      expect(card?.fields[1].value).toBe('Original answer');
+    });
+
+    it('handles multiple edits followed by revert', async () => {
+      const originalHtml = '<p>Original</p>';
+      
+      loadMockCollection([{ front: originalHtml, back: 'Answer' }], 'Test.apkg');
+      const cards = Array.from(useAppStore.getState().cards.values());
+      const cardId = cards[0].cardId;
+
+      // Multiple edits
+      await useAppStore.getState().updateCardFields(cardId, [
+        { name: 'Front', value: '<p>Edit 1</p>' },
+        { name: 'Back', value: 'Answer' },
+      ]);
+      await useAppStore.getState().updateCardFields(cardId, [
+        { name: 'Front', value: '<p>Edit 2</p>' },
+        { name: 'Back', value: 'Answer' },
+      ]);
+      await useAppStore.getState().updateCardFields(cardId, [
+        { name: 'Front', value: '<p>Edit 3</p>' },
+        { name: 'Back', value: 'Answer' },
+      ]);
+
+      // Verify final edit
+      let card = useAppStore.getState().getCard(cardId);
+      expect(card?.fields[0].value).toBe('<p>Edit 3</p>');
+
+      // Revert should go back to original, not previous edit
+      useAppStore.getState().restoreCardFields(cardId);
+      card = useAppStore.getState().getCard(cardId);
+      expect(card?.fields[0].value).toBe(originalHtml);
+      expect(card?.isEdited).toBe(false);
+    });
+
+    it('preserves data URL images when editing text (regression test)', async () => {
+      // This test ensures that data URL images are not corrupted when text is edited
+      // Bug: processMediaReferences was treating data URLs as filenames and replacing
+      // them with "missing media" placeholders when they didn't match any media entry
+      const dataUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+      const originalHtml = `<p>Text with <img src="${dataUrl}" width="100"> image</p>`;
+      
+      loadMockCollection([{ front: originalHtml, back: 'Answer' }], 'Test.apkg');
+      const cards = Array.from(useAppStore.getState().cards.values());
+      const cardId = cards[0].cardId;
+
+      // Edit the text but keep the same data URL image
+      const editedHtml = `<p>Edited text with <img src="${dataUrl}" width="100"> image</p>`;
+      await useAppStore.getState().updateCardFields(cardId, [
+        { name: 'Front', value: editedHtml },
+        { name: 'Back', value: 'Answer' },
+      ]);
+
+      const card = useAppStore.getState().getCard(cardId);
+      expect(card?.isEdited).toBe(true);
+      // The data URL should be preserved, not replaced with missing media placeholder
+      expect(card?.fields[0].value).toContain(`src="${dataUrl}"`);
+      expect(card?.fields[0].value).not.toContain('missing-media');
+    });
   });
 
   describe('Card Deletion', () => {
@@ -836,8 +990,6 @@ describe('Persistence Integration Tests', () => {
       cards: new Map(),
       persistedCardState: new Map(),
       addedSuggestedCards: new Map(),
-      undoStack: [],
-      redoStack: [],
       selectedDeckId: null,
       selectedCardId: null,
       isAnalyzing: false,
@@ -1691,8 +1843,6 @@ describe('AddCardPanel State', () => {
       cards: new Map(),
       persistedCardState: new Map(),
       addedSuggestedCards: new Map(),
-      undoStack: [],
-      redoStack: [],
       selectedDeckId: null,
       selectedCardId: null,
       isAnalyzing: false,

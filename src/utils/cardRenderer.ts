@@ -85,6 +85,11 @@ export async function processMediaReferences(
   for (const match of matches) {
     const [fullMatch, beforeSrc, filename, afterSrc] = match;
     
+    // Skip data URLs - they're already processed or pasted directly
+    if (filename.startsWith('data:')) {
+      continue;
+    }
+    
     // Try exact match first
     let blob = media.get(filename);
     

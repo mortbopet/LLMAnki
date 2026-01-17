@@ -189,6 +189,7 @@ const DeckNode: React.FC<DeckNodeProps> = ({
                                 if (e.key === 'Enter') handleConfirmRename();
                                 if (e.key === 'Escape') handleCancelRename();
                             }}
+                            onBlur={handleCancelRename}
                             className="flex-1 px-1 py-0.5 text-sm bg-gray-800 border border-gray-600 rounded text-white"
                             autoFocus
                         />

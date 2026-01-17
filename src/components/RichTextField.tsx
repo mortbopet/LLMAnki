@@ -1,9 +1,22 @@
 import React, { useCallback, useEffect, useState, useRef } from 'react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
-import Image from '@tiptap/extension-image';
+import ImageResize from 'tiptap-extension-resize-image';
 import Placeholder from '@tiptap/extension-placeholder';
-import { Bold, Italic, Underline, Image as ImageIcon, List, ListOrdered, Undo, Redo, Type } from 'lucide-react';
+import Underline from '@tiptap/extension-underline';
+import Link from '@tiptap/extension-link';
+import TextAlign from '@tiptap/extension-text-align';
+import Subscript from '@tiptap/extension-subscript';
+import Superscript from '@tiptap/extension-superscript';
+import Highlight from '@tiptap/extension-highlight';
+import { TextStyle } from '@tiptap/extension-text-style';
+import { Color } from '@tiptap/extension-color';
+import {
+    Bold, Italic, Underline as UnderlineIcon, Strikethrough, Image as ImageIcon,
+    List, ListOrdered, Undo, Redo, Type, Link as LinkIcon,
+    AlignLeft, AlignCenter, AlignRight, Subscript as SubIcon, Superscript as SuperIcon,
+    Highlighter, Code
+} from 'lucide-react';
 
 interface RichTextFieldProps {
     /** Field label displayed above the editor */
@@ -51,17 +64,31 @@ export const RichTextField: React.FC<RichTextFieldProps> = ({
             StarterKit.configure({
                 heading: false, // Disable headings for Anki cards
             }),
-            Image.configure({
+            ImageResize.configure({
                 inline: true,
                 allowBase64: true,
-                HTMLAttributes: {
-                    class: 'max-w-full inline-block align-middle cursor-pointer hover:outline hover:outline-1 hover:outline-dashed hover:outline-blue-400',
-                },
             }),
             Placeholder.configure({
                 placeholder,
                 emptyEditorClass: 'is-editor-empty',
             }),
+            Underline,
+            Link.configure({
+                openOnClick: false, // Don't open links when editing
+                HTMLAttributes: {
+                    class: 'text-blue-400 underline cursor-pointer',
+                },
+            }),
+            TextAlign.configure({
+                types: ['paragraph'],
+            }),
+            Subscript,
+            Superscript,
+            Highlight.configure({
+                multicolor: false,
+            }),
+            TextStyle,
+            Color,
         ],
         content: value,
         editorProps: {
@@ -121,6 +148,13 @@ export const RichTextField: React.FC<RichTextFieldProps> = ({
         },
         onFocus: () => setIsFocused(true),
         onBlur: () => setIsFocused(false),
+        onTransaction: ({ transaction }) => {
+            // Mark as edited when the document actually changes (not just selection)
+            // This catches image resizing and other programmatic changes
+            if (transaction.docChanged) {
+                hasUserEdited.current = true;
+            }
+        },
     });
 
     // Update editor content when value prop changes externally
@@ -194,6 +228,22 @@ export const RichTextField: React.FC<RichTextFieldProps> = ({
         editor.chain().focus().deleteSelection().insertContent(clozeText).run();
     }, [editor, value]);
 
+    const handleInsertLink = useCallback(() => {
+        if (!editor) return;
+        hasUserEdited.current = true;
+
+        const previousUrl = editor.getAttributes('link').href;
+        const url = window.prompt('Enter URL:', previousUrl || 'https://');
+
+        if (url === null) return; // Cancelled
+
+        if (url === '') {
+            editor.chain().focus().extendMarkRange('link').unsetLink().run();
+        } else {
+            editor.chain().focus().extendMarkRange('link').setLink({ href: url }).run();
+        }
+    }, [editor]);
+
     const showToolbar = alwaysShowToolbar || isFocused;
 
     if (!editor) {
@@ -208,10 +258,11 @@ export const RichTextField: React.FC<RichTextFieldProps> = ({
 
             {/* Toolbar */}
             <div
-                className={`flex items-center gap-1 mb-2 p-1 bg-gray-700 rounded transition-all duration-75 ${showToolbar ? 'opacity-100 max-h-12' : 'opacity-0 max-h-0 overflow-hidden mb-0 p-0'
+                className={`flex flex-wrap items-center gap-1 mb-2 p-1 bg-gray-700 rounded transition-all duration-75 ${showToolbar ? 'opacity-100' : 'opacity-0 max-h-0 overflow-hidden mb-0 p-0'
                     }`}
                 onMouseDown={(e) => e.preventDefault()} // Prevent blur
             >
+                {/* Text formatting */}
                 <button
                     type="button"
                     tabIndex={-1}
@@ -233,15 +284,96 @@ export const RichTextField: React.FC<RichTextFieldProps> = ({
                 <button
                     type="button"
                     tabIndex={-1}
+                    onClick={() => runWithEditMark(() => editor.chain().focus().toggleUnderline().run())}
+                    className={`p-1.5 hover:bg-gray-600 rounded ${editor.isActive('underline') ? 'bg-gray-600' : ''}`}
+                    title="Underline (Ctrl+U)"
+                >
+                    <UnderlineIcon className="w-4 h-4" />
+                </button>
+                <button
+                    type="button"
+                    tabIndex={-1}
                     onClick={() => runWithEditMark(() => editor.chain().focus().toggleStrike().run())}
                     className={`p-1.5 hover:bg-gray-600 rounded ${editor.isActive('strike') ? 'bg-gray-600' : ''}`}
                     title="Strikethrough"
                 >
-                    <Underline className="w-4 h-4" />
+                    <Strikethrough className="w-4 h-4" />
+                </button>
+                <button
+                    type="button"
+                    tabIndex={-1}
+                    onClick={() => runWithEditMark(() => editor.chain().focus().toggleHighlight().run())}
+                    className={`p-1.5 hover:bg-gray-600 rounded ${editor.isActive('highlight') ? 'bg-gray-600' : ''}`}
+                    title="Highlight"
+                >
+                    <Highlighter className="w-4 h-4" />
+                </button>
+                <button
+                    type="button"
+                    tabIndex={-1}
+                    onClick={() => runWithEditMark(() => editor.chain().focus().toggleCode().run())}
+                    className={`p-1.5 hover:bg-gray-600 rounded ${editor.isActive('code') ? 'bg-gray-600' : ''}`}
+                    title="Inline Code"
+                >
+                    <Code className="w-4 h-4" />
                 </button>
 
                 <div className="w-px h-5 bg-gray-600 mx-1" />
 
+                {/* Sub/Superscript */}
+                <button
+                    type="button"
+                    tabIndex={-1}
+                    onClick={() => runWithEditMark(() => editor.chain().focus().toggleSubscript().run())}
+                    className={`p-1.5 hover:bg-gray-600 rounded ${editor.isActive('subscript') ? 'bg-gray-600' : ''}`}
+                    title="Subscript"
+                >
+                    <SubIcon className="w-4 h-4" />
+                </button>
+                <button
+                    type="button"
+                    tabIndex={-1}
+                    onClick={() => runWithEditMark(() => editor.chain().focus().toggleSuperscript().run())}
+                    className={`p-1.5 hover:bg-gray-600 rounded ${editor.isActive('superscript') ? 'bg-gray-600' : ''}`}
+                    title="Superscript"
+                >
+                    <SuperIcon className="w-4 h-4" />
+                </button>
+
+                <div className="w-px h-5 bg-gray-600 mx-1" />
+
+                {/* Text alignment */}
+                <button
+                    type="button"
+                    tabIndex={-1}
+                    onClick={() => runWithEditMark(() => editor.chain().focus().setTextAlign('left').run())}
+                    className={`p-1.5 hover:bg-gray-600 rounded ${editor.isActive({ textAlign: 'left' }) ? 'bg-gray-600' : ''}`}
+                    title="Align Left"
+                >
+                    <AlignLeft className="w-4 h-4" />
+                </button>
+                <button
+                    type="button"
+                    tabIndex={-1}
+                    onClick={() => runWithEditMark(() => editor.chain().focus().setTextAlign('center').run())}
+                    className={`p-1.5 hover:bg-gray-600 rounded ${editor.isActive({ textAlign: 'center' }) ? 'bg-gray-600' : ''}`}
+                    title="Align Center"
+                >
+                    <AlignCenter className="w-4 h-4" />
+                </button>
+                <button
+                    type="button"
+                    tabIndex={-1}
+                    onClick={() => runWithEditMark(() => editor.chain().focus().setTextAlign('right').run())}
+                    className={`p-1.5 hover:bg-gray-600 rounded ${editor.isActive({ textAlign: 'right' }) ? 'bg-gray-600' : ''}`}
+                    title="Align Right"
+                >
+                    <AlignRight className="w-4 h-4" />
+                </button>
+
+                <div className="w-px h-5 bg-gray-600 mx-1" />
+
+                {/* Lists */}
                 <button
                     type="button"
                     tabIndex={-1}
@@ -263,6 +395,16 @@ export const RichTextField: React.FC<RichTextFieldProps> = ({
 
                 <div className="w-px h-5 bg-gray-600 mx-1" />
 
+                {/* Insert */}
+                <button
+                    type="button"
+                    tabIndex={-1}
+                    onClick={handleInsertLink}
+                    className={`p-1.5 hover:bg-gray-600 rounded ${editor.isActive('link') ? 'bg-gray-600' : ''}`}
+                    title="Insert Link"
+                >
+                    <LinkIcon className="w-4 h-4" />
+                </button>
                 <button
                     type="button"
                     tabIndex={-1}
@@ -275,6 +417,7 @@ export const RichTextField: React.FC<RichTextFieldProps> = ({
 
                 <div className="w-px h-5 bg-gray-600 mx-1" />
 
+                {/* Undo/Redo */}
                 <button
                     type="button"
                     tabIndex={-1}
