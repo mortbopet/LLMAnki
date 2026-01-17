@@ -21,7 +21,7 @@ import {
   resetIdCounter,
 } from '../domain';
 import type { CardStateData } from '../domain';
-import type { CardField, SuggestedCard, AnkiCollection, LLMAnalysisResult } from '../types';
+import type { CardField, SuggestedCard, AnkiCollection, LLMAnalysisResult, ReviewLogEntry } from '../types';
 
 // ============================================================================
 // Test Helpers
@@ -30,10 +30,25 @@ import type { CardField, SuggestedCard, AnkiCollection, LLMAnalysisResult } from
 // Use fixed timestamps for deterministic IDs
 const testSeed = 1000000;
 
+/** Card config with optional review history for testing */
+interface CardConfig {
+  front: string;
+  back: string;
+  scheduling?: {
+    queue?: number;
+    due?: number;
+    interval?: number;
+    factor?: number;
+    reps?: number;
+    lapses?: number;
+  };
+  reviewHistory?: ReviewLogEntry[];
+}
+
 /**
  * Create a mock AnkiCollection for testing using the Deck domain class
  */
-function createMockCollection(cardConfigs: { front: string; back: string }[], baseSeed?: number): AnkiCollection {
+function createMockCollection(cardConfigs: (CardConfig | { front: string; back: string })[], baseSeed?: number): AnkiCollection {
   // Reset ID counter for deterministic tests
   resetIdCounter(baseSeed ?? testSeed);
   
@@ -53,6 +68,7 @@ function createMockCollection(cardConfigs: { front: string; back: string }[], ba
     // Use the deck's method to add cards - need to wait for async
     const noteId = (baseSeed ?? testSeed) + 100 + index;
     const cardId = (baseSeed ?? testSeed) + 1000 + index;
+    const scheduling = 'scheduling' in config ? config.scheduling : undefined;
     
     // Add note directly to collection
     collection.notes.set(noteId, {
@@ -71,13 +87,18 @@ function createMockCollection(cardConfigs: { front: string; back: string }[], ba
       deckId: deck.id,
       ordinal: 0,
       type: 'basic',
-      queue: 0,
-      due: 0,
-      interval: 0,
-      factor: 2500,
-      reps: 0,
-      lapses: 0,
+      queue: scheduling?.queue ?? 0,
+      due: scheduling?.due ?? 0,
+      interval: scheduling?.interval ?? 0,
+      factor: scheduling?.factor ?? 2500,
+      reps: scheduling?.reps ?? 0,
+      lapses: scheduling?.lapses ?? 0,
     });
+    
+    // Add review history if provided
+    if ('reviewHistory' in config && config.reviewHistory && config.reviewHistory.length > 0) {
+      collection.revlog.set(cardId, config.reviewHistory);
+    }
   });
   
   return collection;
@@ -87,6 +108,15 @@ function createMockCollection(cardConfigs: { front: string; back: string }[], ba
  * Load a mock collection into the store with deterministic IDs
  */
 function loadMockCollection(cardConfigs: { front: string; back: string }[], fileName: string, baseSeed?: number): AnkiCollection {
+  const collection = createMockCollection(cardConfigs, baseSeed);
+  useAppStore.getState().setCollection(collection, fileName);
+  return collection;
+}
+
+/**
+ * Load a mock collection with review history support
+ */
+function loadMockCollectionWithReviewHistory(cardConfigs: CardConfig[], fileName: string, baseSeed?: number): AnkiCollection {
   const collection = createMockCollection(cardConfigs, baseSeed);
   useAppStore.getState().setCollection(collection, fileName);
   return collection;
@@ -442,6 +472,68 @@ describe('Store Actions', () => {
       expect(state.fileName).toBeNull();
       expect(state.cards.size).toBe(0);
     });
+
+    it('loads reviewData from collection.revlog when loading cards', () => {
+      // Create a collection with review history
+      const now = Date.now();
+      const reviewHistory: ReviewLogEntry[] = [
+        { id: now - 86400000, cardId: 0, ease: 3, interval: 1, lastInterval: 0, factor: 2500, time: 5000, type: 0 },
+        { id: now - 43200000, cardId: 0, ease: 4, interval: 3, lastInterval: 1, factor: 2500, time: 4000, type: 1 },
+      ];
+      
+      // Use the enhanced createMockCollection with review history
+      loadMockCollectionWithReviewHistory([
+        { 
+          front: 'Card with reviews', 
+          back: 'Answer',
+          scheduling: { queue: 2, due: 100, interval: 3, factor: 2500, reps: 2, lapses: 0 },
+          reviewHistory: reviewHistory
+        },
+        { front: 'Card without reviews', back: 'Answer 2' },
+      ], 'Review Test.apkg');
+      
+      const state = useAppStore.getState();
+      const cards = Array.from(state.cards.values());
+      
+      // First card should have review data
+      const cardWithReviews = cards.find(c => c.currentFields[0].value === 'Card with reviews');
+      expect(cardWithReviews).toBeDefined();
+      expect(cardWithReviews!.reviewData).not.toBeNull();
+      expect(cardWithReviews!.reviewData!.reviewHistory.length).toBe(2);
+      
+      // Second card should have null review data (no reviews)
+      const cardWithoutReviews = cards.find(c => c.currentFields[0].value === 'Card without reviews');
+      expect(cardWithoutReviews).toBeDefined();
+      expect(cardWithoutReviews!.reviewData).toBeNull();
+    });
+
+    it('computes firstReview, lastReview, and totalTime from revlog entries', () => {
+      const now = Date.now();
+      const reviewHistory: ReviewLogEntry[] = [
+        { id: now - 172800000, cardId: 0, ease: 2, interval: 1, lastInterval: 0, factor: 2500, time: 3000, type: 0 },
+        { id: now - 86400000, cardId: 0, ease: 3, interval: 3, lastInterval: 1, factor: 2500, time: 4000, type: 1 },
+        { id: now - 43200000, cardId: 0, ease: 4, interval: 7, lastInterval: 3, factor: 2600, time: 2000, type: 1 },
+      ];
+      
+      loadMockCollectionWithReviewHistory([
+        { 
+          front: 'Card', 
+          back: 'Answer',
+          reviewHistory: reviewHistory
+        },
+      ], 'Review Timing.apkg');
+      
+      const state = useAppStore.getState();
+      const card = Array.from(state.cards.values())[0];
+      
+      expect(card.reviewData).not.toBeNull();
+      // firstReview should be earliest timestamp
+      expect(card.reviewData!.firstReview).toBe(now - 172800000);
+      // lastReview should be latest timestamp
+      expect(card.reviewData!.lastReview).toBe(now - 43200000);
+      // totalTime should be sum of all time (review durations)
+      expect(card.reviewData!.totalTime).toBe(9000); // 3000 + 4000 + 2000
+    });
   });
 
   describe('Deck Creation', () => {
@@ -630,6 +722,96 @@ describe('Store Actions', () => {
       expect(newCard?.origin).toBe('generated');
       expect(newCard?.fields[0].value).toBe('New Question');
       expect(newCard?.fields[1].value).toBe('New Answer');
+    });
+
+    it('does not inherit scheduling/review data when inheritCardMetadata is false', async () => {
+      // Load a deck with cards that have scheduling and review data
+      const now = Date.now();
+      const reviewHistory: ReviewLogEntry[] = [
+        { id: now - 86400000, cardId: 0, ease: 4, interval: 7, lastInterval: 3, factor: 2650, time: 3500, type: 1 },
+      ];
+      
+      loadMockCollectionWithReviewHistory([
+        { 
+          front: 'Source Card', 
+          back: 'Source Answer',
+          scheduling: { queue: 2, due: 500, interval: 7, factor: 2650, reps: 5, lapses: 1 },
+          reviewHistory: reviewHistory
+        },
+      ], 'Inherit Test.apkg');
+      
+      // Ensure inheritCardMetadata is FALSE
+      useAppStore.getState().setLLMConfig({ inheritCardMetadata: false });
+      
+      const deckId = getFirstDeckId();
+      expect(deckId).not.toBeNull();
+      
+      const sourceCard = Array.from(useAppStore.getState().cards.values())[0];
+      expect(sourceCard.scheduling).not.toBeNull();
+      expect(sourceCard.scheduling!.reps).toBe(5);
+      expect(sourceCard.reviewData).not.toBeNull();
+      
+      // Add a new card referencing the source card
+      const suggestedCard = createMockSuggestedCard('New Q', 'New A');
+      const newCardId = await useAppStore.getState().addCard(suggestedCard, deckId!, sourceCard.cardId);
+      
+      expect(newCardId).not.toBeNull();
+      const newCard = useAppStore.getState().getCard(newCardId!);
+      
+      // New card should NOT inherit scheduling data
+      expect(newCard?.scheduling?.reps).toBe(0);
+      expect(newCard?.scheduling?.interval).toBe(0);
+      expect(newCard?.scheduling?.factor).toBe(2500);
+      expect(newCard?.scheduling?.lapses).toBe(0);
+      
+      // New card should NOT inherit review data (should have empty history)
+      expect(newCard?.reviewData?.reviewHistory.length).toBe(0);
+    });
+
+    it('inherits scheduling and review data when inheritCardMetadata is true', async () => {
+      // Load a deck with cards that have scheduling and review data
+      const now = Date.now();
+      const reviewHistory: ReviewLogEntry[] = [
+        { id: now - 172800000, cardId: 0, ease: 2, interval: 1, lastInterval: 0, factor: 2500, time: 5000, type: 0 },
+        { id: now - 86400000, cardId: 0, ease: 4, interval: 7, lastInterval: 1, factor: 2650, time: 3500, type: 1 },
+      ];
+      
+      loadMockCollectionWithReviewHistory([
+        { 
+          front: 'Source Card', 
+          back: 'Source Answer',
+          scheduling: { queue: 2, due: 500, interval: 7, factor: 2650, reps: 5, lapses: 1 },
+          reviewHistory: reviewHistory
+        },
+      ], 'Inherit Test.apkg');
+      
+      // Enable inheritCardMetadata
+      useAppStore.getState().setLLMConfig({ inheritCardMetadata: true });
+      
+      const deckId = getFirstDeckId();
+      expect(deckId).not.toBeNull();
+      
+      const sourceCard = Array.from(useAppStore.getState().cards.values())[0];
+      expect(sourceCard.scheduling).not.toBeNull();
+      expect(sourceCard.reviewData).not.toBeNull();
+      
+      // Add a new card referencing the source card
+      const suggestedCard = createMockSuggestedCard('New Q', 'New A');
+      const newCardId = await useAppStore.getState().addCard(suggestedCard, deckId!, sourceCard.cardId);
+      
+      expect(newCardId).not.toBeNull();
+      const newCard = useAppStore.getState().getCard(newCardId!);
+      
+      // New card SHOULD inherit scheduling data
+      expect(newCard?.scheduling?.reps).toBe(5);
+      expect(newCard?.scheduling?.interval).toBe(7);
+      expect(newCard?.scheduling?.factor).toBe(2650);
+      expect(newCard?.scheduling?.lapses).toBe(1);
+      
+      // New card SHOULD inherit review data
+      expect(newCard?.reviewData).not.toBeNull();
+      expect(newCard?.reviewData?.reviewHistory.length).toBe(2);
+      expect(newCard?.reviewData?.totalTime).toBe(8500); // 5000 + 3500
     });
   });
 });

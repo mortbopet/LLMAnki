@@ -96,11 +96,11 @@ function App() {
             factor: cardState.scheduling?.factor ?? 2500,
             reps: cardState.scheduling?.reps ?? 0,
             lapses: cardState.scheduling?.lapses ?? 0,
-            cardCreated: 0,
-            firstReview: null,
-            lastReview: null,
-            totalTime: 0,
-            reviewHistory: [],
+            cardCreated: cardState.reviewData?.cardCreated ?? 0,
+            firstReview: cardState.reviewData?.firstReview ?? null,
+            lastReview: cardState.reviewData?.lastReview ?? null,
+            totalTime: cardState.reviewData?.totalTime ?? 0,
+            reviewHistory: cardState.reviewData?.reviewHistory ?? [],
         } as RenderedCard;
     }, [selectedCardId, cards]);
 

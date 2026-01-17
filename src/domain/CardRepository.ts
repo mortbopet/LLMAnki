@@ -198,7 +198,9 @@ export async function createGeneratedCard(
     lapses: ankiCard.lapses,
   };
   
-  const reviewData: CardReviewData = sourceCard?.reviewData ? {
+  // Only inherit review data if inheritMetadata is true
+  const shouldInheritReviewData = inheritMetadata && sourceCard?.reviewData;
+  const reviewData: CardReviewData = shouldInheritReviewData ? {
     ...sourceCard.reviewData,
     cardCreated: cardId,
   } : {

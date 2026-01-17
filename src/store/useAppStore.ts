@@ -27,6 +27,7 @@ import type {
   AnkiCard,
   AnkiNote,
   AnkiDeck,
+  ReviewLogEntry,
 } from '../types';
 
 // Enable immer support for Map and Set
@@ -37,6 +38,7 @@ import type {
   CardStateData, 
   PersistedDeckState,
   PersistedDeckInfo,
+  CardReviewData,
 } from '../domain';
 import {
   createCard,
@@ -235,6 +237,37 @@ type AppStore = AppState & AppActions;
 // Persistence Helpers
 // ============================================================================
 
+/**
+ * Build CardReviewData from review log entries
+ * Returns null if no reviews exist for this card
+ */
+function buildReviewData(
+  cardId: number,
+  revlog: Map<number, ReviewLogEntry[]>,
+  cardCreatedTime: number
+): CardReviewData | null {
+  const reviews = revlog.get(cardId);
+  if (!reviews || reviews.length === 0) {
+    return null;
+  }
+  
+  // Sort by timestamp (id field is the timestamp)
+  const sortedReviews = [...reviews].sort((a, b) => a.id - b.id);
+  
+  // Compute aggregates
+  const firstReview = sortedReviews[0].id;
+  const lastReview = sortedReviews[sortedReviews.length - 1].id;
+  const totalTime = sortedReviews.reduce((sum, r) => sum + r.time, 0);
+  
+  return {
+    cardCreated: cardCreatedTime,
+    firstReview,
+    lastReview,
+    totalTime,
+    reviewHistory: sortedReviews,
+  };
+}
+
 function getDeckStateKey(fileName: string): string {
   const sanitized = fileName.replace(/[^a-zA-Z0-9.-]/g, '_');
   return `${DECK_STATE_PREFIX}${sanitized}`;
@@ -418,6 +451,10 @@ export const useAppStore = create<AppStore>()(
                   value: note.fields[index] || '',
                 }));
                 
+                // Build review data from revlog entries
+                // Use note.mod as card creation time (modification time serves as approximation)
+                const reviewData = buildReviewData(cardId, draft.collection!.revlog, note.mod * 1000);
+                
                 // Start with base card state
                 let cardStateData: CardStateData = {
                   cardId: ankiCard.id,
@@ -443,7 +480,7 @@ export const useAppStore = create<AppStore>()(
                     reps: ankiCard.reps,
                     lapses: ankiCard.lapses,
                   },
-                  reviewData: null,
+                  reviewData: reviewData,
                 };
                 
                 // Step 2: Merge any cached state for this card
