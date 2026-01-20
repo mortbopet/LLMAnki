@@ -1,63 +1,59 @@
 # LLMAnki - AI-Powered Anki Deck Improvement
 
-LLMAnki is a web application that helps you improve your Anki flashcards using Large Language Models (LLMs). It analyzes your cards against evidence-based learning principles and suggests improvements.
+LLMAnki is a web application that helps you improve your Anki flashcards using Large Language Models (LLMs). It analyzes your cards and decks against learning principles and suggests improvements.
 
 ## Features
 
 - **📂 Load Anki Decks**: Import your exported `.apkg` files directly in the browser
 - **🌳 Deck Browser**: Navigate through your deck hierarchy and subdecks
 - **📇 Card Viewer**: View all card types (Basic, Cloze, Basic Reversed, etc.)
-- **🤖 AI Analysis**: Get feedback on card quality based on:
-  - **Unambiguous**: Only one reasonable answer
-  - **Atomic**: One fact per card
-  - **Recognizable**: Uses original learning context
-  - **Active Recall**: Requires genuine recall, not recognition
+- **🤖 AI Analysis**:
+    * Get feedback on card quality based a configurable card evaluation prompt
+    * Get suggestions for new and/or replacement cards
+    * Generate deck-wide analyses, such as deck score, and deck "knowledge coverage"; an attempt to qualitatively determine if your deck covers its subject matter well.
+    * Based on the deck-level analysis, generate new cards to "fill in the gaps" of the deck.
 - **✏️ Card Editor**: Edit suggested cards before committing with rich text support
-- **🔄 Multiple LLM Providers**: Choose from OpenAI, Anthropic, Groq, Together AI, OpenRouter, or local Ollama
+- **🔄 Multiple LLM Providers**: Choose from OpenAI, Anthropic, Groq, Together AI, OpenRouter
 - **⚙️ Customizable Prompts**: Adjust the system prompt for different analysis criteria
-
-## Getting Started
-
-### Prerequisites
-
-- Node.js 18+ installed
-- npm, pnpm, or yarn
-
-### Installation
-
-```bash
-# Install dependencies
-npm install
-
-# Start development server
-npm run dev
-```
 
 ### Usage
 
-1. **Load a Deck**: Click "Load .apkg" to import your Anki deck
-2. **Configure LLM**: Click the Settings icon to configure your LLM provider and API key
+Before doing anything, you need to configure an LLM provider. To do so, click the Settings icon to configure your LLM provider and API key (see section below for further details).
+
+The app has mainly been tested using Groq's free tier, so using other models may be flaky or non-functional.
+
+
+1. **Export from Anki**: In the Anki app, select a deck for export
+  - Select format "Anki Deck Package (.apkg)
+  - Remember to select "Include scheduling information", "Include deck presets" and "Include media" for the best experience
+2. **Load a Deck**: Click "Load .apkg" to import your Anki deck
 3. **Browse Cards**: Select a deck from the sidebar, then click on a card
-4. **Analyze**: Click "Analyze with AI" to get feedback and suggestions
-5. **Review & Edit**: Review suggestions, edit if needed, then commit changes
+4. **Analyze**: Click "Analyze" to get feedback and suggested alternative cards
+5. **Review & Edit**: Review suggestions, edit if needed, and add new suggested cards
 6. **Export**: Download your modified deck
+7. **Re-import to Anki**: Start the Anki app on your computer, press `File->Import`, and select the modified `.apkg` file
+  * This will **merge** any _new_ cards from the imported deck to your collection.
+  * This will **not** remove any cards. When you export a deck from LLMAnki, and you have cards marked for deletion, a filter string will be shown to you. This filter can then be copied into the Anki app, showing you all of the cards marked for deletion (which you can then manually bulk-delete).
+
+⚠️ Note: Always back up your Anki collection before importing modified decks! ⚠️
+This app is **highly experimental** and thus provides no guarantees of the integrity of the exported deck. However, as mentioned in 8. above, Anki doesn't do destructive edits on imports, so your decks should be pretty safe.
 
 ## Supported LLM Providers
 
 | Provider | Free Tier | API Key Required |
 |----------|-----------|------------------|
+| Groq | Yes | Yes |
 | OpenAI | No | Yes |
 | Anthropic | No | Yes |
-| Groq | Yes | Yes |
 | Together AI | Yes (limited) | Yes |
 | OpenRouter | Yes (some models) | Yes |
 | Ollama | Yes (local) | No |
 
 ### Getting API Keys
 
+- **Groq**: [console.groq.com](https://console.groq.com) - Free tier available
 - **OpenAI**: [platform.openai.com](https://platform.openai.com)
 - **Anthropic**: [console.anthropic.com](https://console.anthropic.com)
-- **Groq**: [console.groq.com](https://console.groq.com) - Free tier available
 - **Together AI**: [api.together.xyz](https://api.together.xyz)
 - **OpenRouter**: [openrouter.ai](https://openrouter.ai) - Aggregates multiple providers
 
@@ -99,6 +95,7 @@ npm run build
 - API keys are stored locally in your browser's localStorage
 - The app runs entirely in your browser - no backend required
 - Large decks may take a moment to load as SQLite parsing happens in-browser
+- This app has been entirely [vibe-coded](https://en.wikipedia.org/wiki/Vibe_coding) so expect rough edges!
 
 ## License
 

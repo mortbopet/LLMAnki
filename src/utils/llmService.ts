@@ -363,11 +363,11 @@ export function getDefaultDisplaySettings(): DisplaySettings {
 
 // Helper to get API key for current provider
 export function getApiKey(config: LLMConfig): string {
-  // Handle backwards compatibility with old single apiKey field
-  if (!config.apiKeys) {
-    return (config as any).apiKey || '';
+  if (config.apiKeys && Object.keys(config.apiKeys).length > 0) {
+    return config.apiKeys[config.providerId] || '';
   }
-  return config.apiKeys[config.providerId] || '';
+  // Handle backwards compatibility with old single apiKey field
+  return (config as any).apiKey || '';
 }
 
 // Model info returned from provider APIs

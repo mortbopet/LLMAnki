@@ -43,7 +43,7 @@ export const SettingsPanel: React.FC = () => {
     const providerInfo = PROVIDER_INFO[llmConfig.providerId];
 
     // Get current API key for the selected provider (with backwards compatibility)
-    const currentApiKey = llmConfig.apiKeys?.[llmConfig.providerId] || (llmConfig as any).apiKey || '';
+    const currentApiKey = llmConfig.apiKeys?.[llmConfig.providerId] ?? '';
 
     // Load cache info when caching tab is active
     useEffect(() => {

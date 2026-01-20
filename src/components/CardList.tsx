@@ -185,8 +185,12 @@ export const CardList: React.FC = () => {
     const [isLoading, setIsLoading] = React.useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const [includeSubdecks, setIncludeSubdecks] = useState(true);
+    const [showGenerated, setShowGenerated] = useState(true);
+    const [showDeleted, setShowDeleted] = useState(true);
+    const [showNormal, setShowNormal] = useState(true);
     const [sortBy, setSortBy] = useState<'default' | 'score-asc' | 'score-desc' | 'state'>('default');
     const [showSortMenu, setShowSortMenu] = useState(false);
+    const [showFilterMenu, setShowFilterMenu] = useState(false);
 
     const allCards = useMemo(() => {
         if (!collection || selectedDeckId === null) return [];
@@ -212,11 +216,21 @@ export const CardList: React.FC = () => {
         });
     }, [allCards, searchQuery, renderedCards]);
 
+    const stateFilteredCards = useMemo(() => {
+        return filteredCards.filter(card => {
+            const cardState = cards.get(card.id);
+            const isDeleted = cardState?.isDeleted ?? false;
+            const isGenerated = cardState?.origin === 'generated';
+            const isNormal = !isDeleted && !isGenerated;
+            return (isDeleted && showDeleted) || (isGenerated && showGenerated) || (isNormal && showNormal);
+        });
+    }, [filteredCards, cards, showDeleted, showGenerated, showNormal]);
+
     // Sort cards based on sort option
     const sortedCards = useMemo(() => {
-        if (sortBy === 'default') return filteredCards;
+        if (sortBy === 'default') return stateFilteredCards;
 
-        return [...filteredCards].sort((a, b) => {
+        return [...stateFilteredCards].sort((a, b) => {
             if (sortBy === 'score-asc' || sortBy === 'score-desc') {
                 const scoreA = analysisCache.get(a.id)?.feedback?.overallScore ?? -1;
                 const scoreB = analysisCache.get(b.id)?.feedback?.overallScore ?? -1;
@@ -236,7 +250,7 @@ export const CardList: React.FC = () => {
 
             return 0;
         });
-    }, [filteredCards, sortBy, analysisCache, cards]);
+    }, [stateFilteredCards, sortBy, analysisCache, cards]);
 
     // Virtualizer for efficient rendering of large lists
     const rowVirtualizer = useVirtualizer({
@@ -284,7 +298,6 @@ export const CardList: React.FC = () => {
             if (!rendered) {
                 rendered = await renderCard(collection, card);
             }
-            // selectCard now only needs the cardId - rendered content is stored separately
             selectCard(card.id);
         } catch (e) {
             console.error('Failed to select card:', e);
@@ -328,15 +341,61 @@ export const CardList: React.FC = () => {
                 </div>
 
                 <div className="flex items-center justify-between">
-                    <label className="flex items-center gap-2 text-xs text-gray-400 cursor-pointer">
-                        <input
-                            type="checkbox"
-                            checked={includeSubdecks}
-                            onChange={(e) => setIncludeSubdecks(e.target.checked)}
-                            className="rounded border-gray-600 bg-gray-700 text-blue-500 focus:ring-blue-500"
-                        />
-                        Include subdecks
-                    </label>
+                    <div className="relative">
+                        <button
+                            onClick={() => setShowFilterMenu(!showFilterMenu)}
+                            className={`flex items-center gap-1.5 px-2 py-1 text-xs rounded transition-colors ${showFilterMenu
+                                ? 'bg-blue-600 text-white'
+                                : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                                }`}
+                        >
+                            Filters
+                            <ChevronDown className="w-3 h-3" />
+                        </button>
+                        {showFilterMenu && (
+                            <div className="absolute left-0 mt-1 w-48 rounded-md border border-gray-600 bg-gray-800 shadow-lg z-20">
+                                <div className="p-2 space-y-2 text-xs text-gray-200">
+                                    <label className="flex items-center gap-2 cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            checked={includeSubdecks}
+                                            onChange={(e) => setIncludeSubdecks(e.target.checked)}
+                                            className="rounded border-gray-600 bg-gray-700 text-blue-500 focus:ring-blue-500"
+                                        />
+                                        Include subdecks
+                                    </label>
+                                    <div className="h-px bg-gray-700" />
+                                    <label className="flex items-center gap-2 cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            checked={showNormal}
+                                            onChange={(e) => setShowNormal(e.target.checked)}
+                                            className="rounded border-gray-600 bg-gray-700 text-blue-500 focus:ring-blue-500"
+                                        />
+                                        Normal cards
+                                    </label>
+                                    <label className="flex items-center gap-2 cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            checked={showGenerated}
+                                            onChange={(e) => setShowGenerated(e.target.checked)}
+                                            className="rounded border-gray-600 bg-gray-700 text-blue-500 focus:ring-blue-500"
+                                        />
+                                        Generated cards
+                                    </label>
+                                    <label className="flex items-center gap-2 cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            checked={showDeleted}
+                                            onChange={(e) => setShowDeleted(e.target.checked)}
+                                            className="rounded border-gray-600 bg-gray-700 text-blue-500 focus:ring-blue-500"
+                                        />
+                                        Deleted cards
+                                    </label>
+                                </div>
+                            </div>
+                        )}
+                    </div>
 
                     {/* Sort dropdown */}
                     <div className="relative">

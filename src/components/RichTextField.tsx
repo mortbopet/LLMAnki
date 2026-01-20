@@ -65,6 +65,8 @@ export const RichTextField: React.FC<RichTextFieldProps> = ({
     const extensions = useMemo(() => [
         StarterKit.configure({
             heading: false, // Disable headings for Anki cards
+            underline: false,
+            link: false,
         }),
         ResizableImage.configure({
             allowBase64: true,
@@ -154,20 +156,26 @@ export const RichTextField: React.FC<RichTextFieldProps> = ({
 
     // Update editor content when value prop changes externally
     useEffect(() => {
-        if (editor) {
-            const currentHtml = editor.getHTML();
-            const normalizedCurrent = currentHtml === '<p></p>' ? '' : currentHtml;
-            // Only update if the value is actually different from what's in the editor
-            // This prevents fighting with user input while they're typing
-            if (normalizedCurrent !== value && lastEmittedValue.current !== value) {
-                // Reset edit tracking when content is set externally (e.g., revert)
-                hasUserEdited.current = false;
-                lastEmittedValue.current = value;
-                // Mark that we're programmatically setting content to ignore docChanged transactions
-                isSettingContent.current = true;
-                editor.commands.setContent(value || '');
+        if (!editor) return;
+
+        const currentHtml = editor.getHTML();
+        const normalizedCurrent = currentHtml === '<p></p>' ? '' : currentHtml;
+        // Only update if the value is actually different from what's in the editor
+        // This prevents fighting with user input while they're typing
+        if (normalizedCurrent !== value && lastEmittedValue.current !== value) {
+            // Reset edit tracking when content is set externally (e.g., revert)
+            hasUserEdited.current = false;
+            lastEmittedValue.current = value;
+            // Mark that we're programmatically setting content to ignore docChanged transactions
+            isSettingContent.current = true;
+            const rafId = requestAnimationFrame(() => {
+                editor.commands.setContent(value || '', false);
                 isSettingContent.current = false;
-            }
+            });
+
+            return () => {
+                cancelAnimationFrame(rafId);
+            };
         }
     }, [editor, value]);
 

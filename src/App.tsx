@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     Sparkles,
     Settings,
@@ -24,6 +24,7 @@ import { SettingsPanel } from './components/SettingsPanel';
 import { ToastContainer } from './components/ToastContainer';
 import { SystemPromptUpdateModal } from './components/SystemPromptUpdateModal';
 import { ErrorModal } from './components/ErrorModal';
+import { ExportDeletionFilterModal } from './components/ExportDeletionFilterModal';
 import { LandingPage } from './components/LandingPage';
 import { AddCardPanel } from './components/AddCardPanel';
 import { analyzeCard, analyzeCardsInDeck, generateDeckInsights, getApiKey, DEFAULT_SYSTEM_PROMPT, SYSTEM_PROMPT_VERSION } from './utils/llmService';
@@ -65,6 +66,72 @@ function App() {
     const exportProgress = useAppStore(state => state.exportProgress);
     const setIsExporting = useAppStore(state => state.setIsExporting);
     const setExportProgress = useAppStore(state => state.setExportProgress);
+
+    const [deckWidth, setDeckWidth] = useState(256);
+    const [listWidth, setListWidth] = useState(288);
+    const dragRef = useRef<{ type: 'deck' | 'list' | null; startX: number; startDeck: number; startList: number }>({
+        type: null,
+        startX: 0,
+        startDeck: 256,
+        startList: 288,
+    });
+
+    useEffect(() => {
+        const handleMouseMove = (e: MouseEvent) => {
+            if (!dragRef.current.type) return;
+            const delta = e.clientX - dragRef.current.startX;
+            const minDeck = 200;
+            const maxDeck = 420;
+            const minList = 220;
+            const maxList = 520;
+            const minMain = 360;
+            const totalWidth = window.innerWidth;
+
+            if (dragRef.current.type === 'deck') {
+                const next = Math.min(maxDeck, Math.max(minDeck, dragRef.current.startDeck + delta));
+                const remaining = totalWidth - next - listWidth;
+                if (remaining >= minMain) {
+                    setDeckWidth(next);
+                }
+            } else if (dragRef.current.type === 'list') {
+                const next = Math.min(maxList, Math.max(minList, dragRef.current.startList + delta));
+                const remaining = totalWidth - deckWidth - next;
+                if (remaining >= minMain) {
+                    setListWidth(next);
+                }
+            }
+        };
+
+        const handleMouseUp = () => {
+            dragRef.current.type = null;
+        };
+
+        window.addEventListener('mousemove', handleMouseMove);
+        window.addEventListener('mouseup', handleMouseUp);
+
+        return () => {
+            window.removeEventListener('mousemove', handleMouseMove);
+            window.removeEventListener('mouseup', handleMouseUp);
+        };
+    }, [deckWidth, listWidth]);
+
+    const handleDeckResizeStart = useCallback((e: React.MouseEvent) => {
+        dragRef.current = {
+            type: 'deck',
+            startX: e.clientX,
+            startDeck: deckWidth,
+            startList: listWidth,
+        };
+    }, [deckWidth, listWidth]);
+
+    const handleListResizeStart = useCallback((e: React.MouseEvent) => {
+        dragRef.current = {
+            type: 'list',
+            startX: e.clientX,
+            startDeck: deckWidth,
+            startList: listWidth,
+        };
+    }, [deckWidth, listWidth]);
 
     // Card editing
     const updateCardFields = useAppStore(state => state.updateCardFields);
@@ -145,6 +212,8 @@ function App() {
     const [additionalPrompt, setAdditionalPrompt] = useState('');
     const [deckAdditionalPrompt, setDeckAdditionalPrompt] = useState('');
     const [showPromptUpdateModal, setShowPromptUpdateModal] = useState(false);
+    const [deletionFilter, setDeletionFilter] = useState<string | null>(null);
+    const [deletionFilterDeckName, setDeletionFilterDeckName] = useState('All Decks');
     // Track which deck has the add card panel open (null = closed)
     const [addCardPanelDeckId, setAddCardPanelDeckId] = useState<number | null>(null);
 
@@ -414,6 +483,25 @@ function App() {
             a.download = 'modified_collection.apkg';
             a.click();
             URL.revokeObjectURL(url);
+
+            if (markedForDeletion.size > 0) {
+                const noteIds = new Set<number>();
+                for (const cardId of markedForDeletion) {
+                    const cardState = cards.get(cardId);
+                    if (cardState?.noteId) {
+                        noteIds.add(cardState.noteId);
+                    }
+                }
+
+                if (noteIds.size > 0) {
+                    const filter = `nid:${Array.from(noteIds).join(',')}`;
+                    const deckName = selectedDeckId !== null
+                        ? collection.decks.get(selectedDeckId)?.name || 'Selected Deck'
+                        : 'All Decks';
+                    setDeletionFilterDeckName(deckName);
+                    setDeletionFilter(filter);
+                }
+            }
         } catch (error) {
             console.error('Export failed:', error);
             alert('Export failed. See console for details.');
@@ -421,7 +509,7 @@ function App() {
             setIsExporting(false);
             setExportProgress(null);
         }
-    }, [collection, markedForDeletion, ankiSettings.exportMediaFormat, setIsExporting, setExportProgress]);
+    }, [collection, markedForDeletion, ankiSettings.exportMediaFormat, setIsExporting, setExportProgress, cards, selectedDeckId]);
 
     return (
         <div className={`h-screen flex flex-col ${isDarkMode ? 'bg-anki-dark text-white' : 'bg-gray-100 text-gray-900'}`}>
@@ -498,14 +586,30 @@ function App() {
                 ) : (
                     <>
                         {/* Left Sidebar - Deck Browser */}
-                        <aside className={`w-64 flex-shrink-0 border-r overflow-hidden flex flex-col ${isDarkMode ? 'bg-anki-darker border-gray-700' : 'bg-white border-gray-200'}`}>
+                        <aside
+                            className={`flex-shrink-0 border-r overflow-hidden flex flex-col ${isDarkMode ? 'bg-anki-darker border-gray-700' : 'bg-white border-gray-200'}`}
+                            style={{ width: deckWidth }}
+                        >
                             <DeckBrowser />
                         </aside>
 
+                        <div
+                            onMouseDown={handleDeckResizeStart}
+                            className={`flex-shrink-0 w-1.5 cursor-col-resize ${isDarkMode ? 'bg-gray-800 hover:bg-gray-700' : 'bg-gray-100 hover:bg-gray-200'}`}
+                        />
+
                         {/* Card List */}
-                        <aside className={`w-72 flex-shrink-0 border-r overflow-hidden ${isDarkMode ? 'bg-gray-900 border-gray-700' : 'bg-gray-50 border-gray-200'}`}>
+                        <aside
+                            className={`flex-shrink-0 border-r overflow-hidden ${isDarkMode ? 'bg-gray-900 border-gray-700' : 'bg-gray-50 border-gray-200'}`}
+                            style={{ width: listWidth }}
+                        >
                             <CardList />
                         </aside>
+
+                        <div
+                            onMouseDown={handleListResizeStart}
+                            className={`flex-shrink-0 w-1.5 cursor-col-resize ${isDarkMode ? 'bg-gray-800 hover:bg-gray-700' : 'bg-gray-100 hover:bg-gray-200'}`}
+                        />
 
                         {/* Main Panel */}
                         <div className="flex-1 flex flex-col overflow-hidden">
@@ -518,6 +622,9 @@ function App() {
                                                 <BookOpen className="w-5 h-5" />
                                                 Current Card
                                             </h2>
+                                            <div className={`text-xs mb-3 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                                                Deck: <span className="font-medium">{selectedCard.deckName || 'Unknown Deck'}</span>
+                                            </div>
                                             <CardViewer
                                                 card={selectedCard}
                                                 title="Original Card"
@@ -714,6 +821,14 @@ function App() {
                 <ErrorModal
                     error={analysisError}
                     onClose={() => setAnalysisError(null)}
+                />
+            )}
+
+            {deletionFilter && (
+                <ExportDeletionFilterModal
+                    deckName={deletionFilterDeckName}
+                    filterText={deletionFilter}
+                    onClose={() => setDeletionFilter(null)}
                 />
             )}
         </div>

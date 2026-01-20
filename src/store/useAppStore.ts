@@ -1299,15 +1299,19 @@ export const useAppStore = create<AppStore>()(
           const persistedConfig = (persisted.llmConfig || {}) as Partial<LLMConfig>;
           const persistedAnkiSettings = (persisted.ankiSettings || {}) as Partial<AnkiSettings>;
           const persistedDisplaySettings = (persisted.displaySettings || {}) as Partial<DisplaySettings>;
+          const migratedApiKeys = { ...currentState.llmConfig.apiKeys, ...(persistedConfig.apiKeys || {}) };
+          const legacyApiKey = (persistedConfig as { apiKey?: string }).apiKey;
+          if (legacyApiKey && !migratedApiKeys[persistedConfig.providerId || '']) {
+            const legacyProviderId = persistedConfig.providerId || currentState.llmConfig.providerId;
+            migratedApiKeys[legacyProviderId] = legacyApiKey;
+          }
+
           return {
             ...currentState,
             llmConfig: {
               ...currentState.llmConfig,
               ...persistedConfig,
-              apiKeys: {
-                ...currentState.llmConfig.apiKeys,
-                ...(persistedConfig.apiKeys || {}),
-              },
+              apiKeys: migratedApiKeys,
             },
             ankiSettings: {
               ...currentState.ankiSettings,

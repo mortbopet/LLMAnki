@@ -533,6 +533,16 @@ export async function parseApkgFile(file: File, onProgress?: (progress: string) 
   let collectionFile = zip.file('collection.anki21b')
     || zip.file('collection.anki21')
     || zip.file('collection.anki2');
+
+  const legacyDbFile = zip.file('collection.anki2');
+  let sourceLegacyDb: Uint8Array | undefined;
+  if (legacyDbFile) {
+    try {
+      sourceLegacyDb = await legacyDbFile.async('uint8array');
+    } catch (e) {
+      console.warn('[APKG Parser] Failed to read collection.anki2:', e);
+    }
+  }
   
   // Check for anki21 folder structure (some exports)
   if (!collectionFile) {
@@ -749,15 +759,25 @@ export async function parseApkgFile(file: File, onProgress?: (progress: string) 
   onProgress?.('Parsing deck structure...');
   let models: Map<number, AnkiModel>;
   let decks: Map<number, AnkiDeck>;
+  let modernMeta: AnkiCollection['modernMeta'] | undefined;
   const tablesResult = db.exec("SELECT name FROM sqlite_master WHERE type='table'");
   const tableNames = tablesResult.length > 0 
     ? tablesResult[0].values.map(row => row[0] as string) 
     : [];
+  const tableNameSet = new Set(tableNames);
   
   // Check if this is the new schema (has 'notetypes' table) or old (has 'col' with JSON)
   const hasNewSchema = tableNames.includes('notetypes');
+  const legacyNoteColumns = ['id', 'guid', 'mid', 'mod', 'usn', 'tags', 'flds', 'sfld', 'csum', 'flags', 'data'];
+  const legacyCardColumns = ['id', 'nid', 'did', 'ord', 'mod', 'usn', 'type', 'queue', 'due', 'ivl', 'factor', 'reps', 'lapses', 'left', 'odue', 'odid', 'flags', 'data'];
+  const legacyRevlogColumns = ['id', 'cid', 'usn', 'ease', 'ivl', 'lastIvl', 'factor', 'time', 'type'];
+  const legacyColColumns = ['id', 'crt', 'mod', 'scm', 'ver', 'dty', 'usn', 'ls', 'conf', 'models', 'decks', 'dconf', 'tags'];
   
   if (!hasNewSchema) {
+    if (tableNameSet.has('col')) warnUnexpectedColumns(db, 'col', legacyColColumns);
+    if (tableNameSet.has('notes')) warnUnexpectedColumns(db, 'notes', legacyNoteColumns);
+    if (tableNameSet.has('cards')) warnUnexpectedColumns(db, 'cards', legacyCardColumns);
+    if (tableNameSet.has('revlog')) warnUnexpectedColumns(db, 'revlog', legacyRevlogColumns);
     // Old format - models and decks in col table as JSON strings
     const colResult = db.exec('SELECT models, decks FROM col');
     
@@ -771,9 +791,58 @@ export async function parseApkgFile(file: File, onProgress?: (progress: string) 
       throw new Error('Invalid collection: could not parse deck metadata');
     }
   } else {
+    if (tableNameSet.has('col')) warnUnexpectedColumns(db, 'col', legacyColColumns);
+    if (tableNameSet.has('notes')) warnUnexpectedColumns(db, 'notes', legacyNoteColumns.concat(['ntid']));
+    if (tableNameSet.has('cards')) warnUnexpectedColumns(db, 'cards', legacyCardColumns);
+    if (tableNameSet.has('revlog')) warnUnexpectedColumns(db, 'revlog', legacyRevlogColumns);
+    if (tableNameSet.has('notetypes')) warnUnexpectedColumns(db, 'notetypes', ['id', 'name', 'mtime_secs', 'usn', 'config']);
+    if (tableNameSet.has('fields')) warnUnexpectedColumns(db, 'fields', ['ntid', 'ord', 'name', 'config']);
+    if (tableNameSet.has('templates')) warnUnexpectedColumns(db, 'templates', ['ntid', 'ord', 'name', 'mtime_secs', 'usn', 'config']);
+    if (tableNameSet.has('decks')) warnUnexpectedColumns(db, 'decks', ['id', 'name', 'mtime_secs', 'usn', 'common', 'kind']);
+    if (tableNameSet.has('deck_config')) warnUnexpectedColumns(db, 'deck_config', ['id', 'name', 'mtime_secs', 'usn', 'config']);
+    if (tableNameSet.has('config')) warnUnexpectedColumns(db, 'config', ['key', 'KEY', 'usn', 'mtime_secs', 'val']);
+    if (tableNameSet.has('tags')) warnUnexpectedColumns(db, 'tags', ['tag', 'usn']);
     // New Anki 2.1.50+ format - models and decks are in separate tables
     models = new Map<number, AnkiModel>();
     decks = new Map<number, AnkiDeck>();
+
+    // Capture raw modern schema rows for lossless export
+    const colColumns = tableNameSet.has('col') ? getTableColumns(db, 'col') : [];
+    const notetypesColumns = tableNameSet.has('notetypes') ? getTableColumns(db, 'notetypes') : [];
+    const fieldsColumns = tableNameSet.has('fields') ? getTableColumns(db, 'fields') : [];
+    const templatesColumns = tableNameSet.has('templates') ? getTableColumns(db, 'templates') : [];
+    const decksColumns = tableNameSet.has('decks') ? getTableColumns(db, 'decks') : [];
+    const deckConfigColumns = tableNameSet.has('deck_config') ? getTableColumns(db, 'deck_config') : [];
+    const configColumns = tableNameSet.has('config') ? getTableColumns(db, 'config') : [];
+    const tagsColumns = tableNameSet.has('tags') ? getTableColumns(db, 'tags') : [];
+
+    const colRow = tableNameSet.has('col') ? safeSelectAll(db, 'col') : [];
+    const notetypesRows = tableNameSet.has('notetypes') ? safeSelectAll(db, 'notetypes') : [];
+    const fieldsRows = tableNameSet.has('fields') ? safeSelectAll(db, 'fields') : [];
+    const templatesRows = tableNameSet.has('templates') ? safeSelectAll(db, 'templates') : [];
+    const decksRows = tableNameSet.has('decks') ? safeSelectAll(db, 'decks') : [];
+    const deckConfigRows = tableNameSet.has('deck_config') ? safeSelectAll(db, 'deck_config') : [];
+    const configRows = tableNameSet.has('config') ? safeSelectAll(db, 'config') : [];
+    const tagsRows = tableNameSet.has('tags') ? safeSelectAll(db, 'tags') : [];
+
+    modernMeta = {
+      colColumns,
+      colRow: colRow[0]?.values?.[0] ? [...colRow[0].values[0]] : undefined,
+      notetypesColumns,
+      notetypesRows: notetypesRows[0]?.values?.map(row => [...row]) ?? [],
+      fieldsColumns,
+      fieldsRows: fieldsRows[0]?.values?.map(row => [...row]) ?? [],
+      templatesColumns,
+      templatesRows: templatesRows[0]?.values?.map(row => [...row]) ?? [],
+      decksColumns,
+      decksRows: decksRows[0]?.values?.map(row => [...row]) ?? [],
+      deckConfigColumns,
+      deckConfigRows: deckConfigRows[0]?.values?.map(row => [...row]) ?? [],
+      configColumns,
+      configRows: configRows[0]?.values?.map(row => [...row]) ?? [],
+      tagsColumns,
+      tagsRows: tagsRows[0]?.values?.map(row => [...row]) ?? [],
+    };
     
     // Parse notetypes (models) from new format
     try {
@@ -878,7 +947,7 @@ export async function parseApkgFile(file: File, onProgress?: (progress: string) 
   const notes = new Map<number, AnkiNote>();
   
   // Get notes table schema to handle both old (mid) and new (ntid) formats
-  let notesQuery = 'SELECT id, mid, flds, tags, guid, mod FROM notes';
+  let notesQuery = 'SELECT id, mid, flds, tags, guid, mod, usn, sfld, csum, flags, data FROM notes';
   try {
     // First try to check schema
     const schemaResult = db.exec("PRAGMA table_info(notes)");
@@ -888,7 +957,7 @@ export async function parseApkgFile(file: File, onProgress?: (progress: string) 
     
     // New Anki may use 'ntid' instead of 'mid'
     if (columns.includes('ntid') && !columns.includes('mid')) {
-      notesQuery = 'SELECT id, ntid as mid, flds, tags, guid, mod FROM notes';
+      notesQuery = 'SELECT id, ntid as mid, flds, tags, guid, mod, usn, sfld, csum, flags, data FROM notes';
     }
   } catch (e) {
     console.warn('Could not check notes schema:', e);
@@ -907,7 +976,12 @@ export async function parseApkgFile(file: File, onProgress?: (progress: string) 
         fields: flds ? flds.split(FIELD_SEPARATOR) : [],
         tags: row[3] ? (row[3] as string).split(' ').filter(t => t) : [],
         guid: row[4] as string,
-        mod: Number(row[5])
+        mod: Number(row[5]),
+        usn: row[6] !== undefined ? Number(row[6]) : undefined,
+        sfld: row[7] ? (row[7] as string) : undefined,
+        csum: row[8] !== undefined ? Number(row[8]) : undefined,
+        flags: row[9] !== undefined ? Number(row[9]) : undefined,
+        data: row[10] ? (row[10] as string) : undefined
       });
     }
   }
@@ -915,7 +989,7 @@ export async function parseApkgFile(file: File, onProgress?: (progress: string) 
   // Parse cards - include all fields per Anki database schema
   onProgress?.('Parsing cards...');
   const cards = new Map<number, AnkiCard>();
-  const cardsResult = db.exec('SELECT id, nid, did, ord, type, queue, due, ivl, factor, reps, lapses, left, odue, odid, flags FROM cards');
+  const cardsResult = db.exec('SELECT id, nid, did, ord, mod, usn, type, queue, due, ivl, factor, reps, lapses, left, odue, odid, flags, data FROM cards');
   
   if (cardsResult.length > 0) {
     for (const row of cardsResult[0].values) {
@@ -924,23 +998,26 @@ export async function parseApkgFile(file: File, onProgress?: (progress: string) 
       const note = notes.get(noteId);
       const model = note ? models.get(note.modelId) : undefined;
       
-      // Column indices from SELECT: id(0), nid(1), did(2), ord(3), type(4), queue(5), due(6), ivl(7), factor(8), reps(9), lapses(10), left(11), odue(12), odid(13), flags(14)
+      // Column indices from SELECT: id(0), nid(1), did(2), ord(3), mod(4), usn(5), type(6), queue(7), due(8), ivl(9), factor(10), reps(11), lapses(12), left(13), odue(14), odid(15), flags(16), data(17)
       cards.set(cardId, {
         id: cardId,
         noteId: noteId,
         deckId: Number(row[2]),
         ordinal: Number(row[3]),
         type: model ? determineCardType(model) : 'basic',
-        queue: Number(row[5]),
-        due: Number(row[6]),
-        interval: Number(row[7]),
-        factor: Number(row[8]),
-        reps: Number(row[9]),
-        lapses: Number(row[10]),
-        left: Number(row[11]),
-        odue: Number(row[12]),
-        odid: Number(row[13]),
-        flags: Number(row[14])
+        queue: Number(row[7]),
+        due: Number(row[8]),
+        interval: Number(row[9]),
+        factor: Number(row[10]),
+        reps: Number(row[11]),
+        lapses: Number(row[12]),
+        mod: row[4] !== undefined ? Number(row[4]) : undefined,
+        usn: row[5] !== undefined ? Number(row[5]) : undefined,
+        left: Number(row[13]),
+        odue: Number(row[14]),
+        odid: Number(row[15]),
+        flags: Number(row[16]),
+        data: row[17] ? (row[17] as string) : undefined
       });
     }
   }
@@ -990,7 +1067,9 @@ export async function parseApkgFile(file: File, onProgress?: (progress: string) 
     media,
     deckTree,
     schemaFormat: hasNewSchema ? 'modern' : 'legacy',
-    sourceApkg: file
+    sourceApkg: file,
+    modernMeta,
+    sourceLegacyDb
   };
 }
 
@@ -1017,6 +1096,74 @@ export interface ExportOptions {
 function uint8ArrayToHex(data: Uint8Array): string {
   return Array.from(data).map(b => b.toString(16).padStart(2, '0')).join('');
 }
+
+function sqlValue(value: unknown): string {
+  if (value === null || value === undefined) return 'NULL';
+  if (value instanceof Uint8Array) return `x'${uint8ArrayToHex(value)}'`;
+  if (value instanceof ArrayBuffer) return `x'${uint8ArrayToHex(new Uint8Array(value))}'`;
+  if (typeof value === 'number') return Number.isFinite(value) ? String(value) : '0';
+  if (typeof value === 'bigint') return value.toString();
+  if (typeof value === 'string') return `'${value.replace(/'/g, "''")}'`;
+  return `'${String(value).replace(/'/g, "''")}'`;
+}
+
+function warnUnexpectedColumns(
+  db: { exec: (sql: string) => Array<{ values: unknown[][] }> },
+  tableName: string,
+  expectedColumns: string[]
+): void {
+  try {
+    const schema = db.exec(`PRAGMA table_info(${tableName})`);
+    const columns = schema.length > 0
+      ? schema[0].values.map(row => String(row[1]))
+      : [];
+    if (columns.length === 0) return;
+
+    const unexpected = columns.filter(col => !expectedColumns.includes(col));
+    if (unexpected.length > 0) {
+      console.warn(`[APKG Parser] Unexpected columns in ${tableName}: ${unexpected.join(', ')}`);
+    }
+  } catch (e) {
+    console.warn(`[APKG Parser] Failed to inspect ${tableName} schema:`, e);
+  }
+}
+
+function getTableColumns(
+  db: { exec: (sql: string) => Array<{ values: unknown[][] }> },
+  tableName: string
+): string[] {
+  try {
+    const schema = db.exec(`PRAGMA table_info(${tableName})`);
+    return schema.length > 0
+      ? schema[0].values.map(row => String(row[1]))
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function safeSelectAll(
+  db: { exec: (sql: string) => Array<{ values: unknown[][] }> },
+  tableName: string
+): Array<{ values: unknown[][] }> {
+  try {
+    return db.exec(`SELECT * FROM "${tableName}"`);
+  } catch (e) {
+    const columns = getTableColumns(db, tableName);
+    if (columns.length > 0) {
+      try {
+        const columnList = columns.map(col => `"${col}"`).join(', ');
+        return db.exec(`SELECT ${columnList} FROM "${tableName}"`);
+      } catch (inner) {
+        console.warn(`[APKG Parser] Failed to read ${tableName} rows:`, inner);
+      }
+    } else {
+      console.warn(`[APKG Parser] Failed to read ${tableName} rows:`, e);
+    }
+    return [];
+  }
+}
+
 
 /**
  * Creates the modern Anki 2.1.28+ database schema with separate tables
@@ -1336,140 +1483,270 @@ export async function exportCollection(
     reportProgress('Building schema', 5);
     // Use the modern Anki 2.1.28+ schema
     createModernSchema(db);
-    
-    // Insert empty col row (data is in separate tables)
-    db.exec(`
-      INSERT INTO col VALUES (
-        1,
-        ${now - 86400},
-        ${nowMs},
-        ${nowMs},
-        18,
-        0,
-        0,
-        0,
-        '',
-        '',
-        '',
-        '',
-        ''
-      )
-    `);
-    
-    // Insert notetypes, fields, and templates
-    for (const [id, model] of collection.models) {
-      // Encode notetype config
-      const notetypeConfig = anki.NotetypeConfig.create({
-        kind: model.type as anki.NotetypeConfig.Kind,
-        sortFieldIdx: model.sortField ?? 0,
-        css: model.css || '',
-        latexPre: model.latexPre || '\\documentclass[12pt]{article}\n\\special{papersize=3in,5in}\n\\usepackage{amssymb,amsmath}\n\\pagestyle{empty}\n\\setlength{\\parindent}{0in}\n\\begin{document}',
-        latexPost: model.latexPost || '\\end{document}',
-        latexSvg: false
-      });
-      const notetypeConfigBytes = anki.NotetypeConfig.encode(notetypeConfig).finish();
-      
-      db.exec(`INSERT INTO notetypes VALUES (${id}, '${model.name.replace(/'/g, "''")}', ${now}, -1, x'${uint8ArrayToHex(notetypeConfigBytes)}')`);
-      
-      // Insert fields
-      for (const field of model.fields) {
-        const fieldConfig = anki.NoteFieldConfig.create({
-          sticky: field.sticky || false,
-          rtl: false,
-          fontName: 'Arial',
-          fontSize: 20,
-          description: '',
-          plainText: false,
-          collapsed: false,
-          excludeFromSearch: false
-        });
-        const fieldConfigBytes = anki.NoteFieldConfig.encode(fieldConfig).finish();
-        
-        db.exec(`INSERT INTO fields VALUES (${id}, ${field.ordinal}, '${field.name.replace(/'/g, "''")}', x'${uint8ArrayToHex(fieldConfigBytes)}')`);
+
+    const meta = collection.modernMeta;
+    const canUseMeta = !!meta && (meta?.notetypesColumns?.length || meta?.decksColumns?.length);
+
+    const insertRows = (
+      tableName: string,
+      columns: string[] | undefined,
+      rows: unknown[][] | undefined,
+      filter?: (row: unknown[]) => boolean
+    ) => {
+      if (!columns || columns.length === 0 || !rows || rows.length === 0) return;
+      const columnList = columns.map(c => `"${c}"`).join(', ');
+      for (const row of rows) {
+        if (filter && !filter(row)) continue;
+        db.exec(`INSERT INTO ${tableName} (${columnList}) VALUES (${row.map(sqlValue).join(', ')})`);
       }
-      
-      // Insert templates
-      for (const tmpl of model.templates) {
-        const templateConfig = anki.CardTemplateConfig.create({
-          qFormat: tmpl.questionFormat,
-          aFormat: tmpl.answerFormat,
-          qFormatBrowser: '',
-          aFormatBrowser: '',
-          targetDeckId: 0,
-          browserFontName: '',
-          browserFontSize: 0
-        });
-        const templateConfigBytes = anki.CardTemplateConfig.encode(templateConfig).finish();
-        
-        db.exec(`INSERT INTO templates VALUES (${id}, ${tmpl.ordinal}, '${tmpl.name.replace(/'/g, "''")}', ${now}, -1, x'${uint8ArrayToHex(templateConfigBytes)}')`);
+    };
+
+    if (canUseMeta) {
+      if (meta?.colRow && meta.colColumns && meta.colColumns.length > 0) {
+        const colColumns = meta.colColumns.map(c => `"${c}"`).join(', ');
+        db.exec(`INSERT INTO col (${colColumns}) VALUES (${meta.colRow.map(sqlValue).join(', ')})`);
+      } else {
+        db.exec(`
+          INSERT INTO col VALUES (
+            1,
+            ${now - 86400},
+            ${nowMs},
+            ${nowMs},
+            18,
+            0,
+            0,
+            0,
+            '',
+            '',
+            '',
+            '',
+            ''
+          )
+        `);
       }
-    }
-    
-    // Insert decks
-    for (const [id, deck] of collection.decks) {
-      const common = anki.DeckCommon.create({
-        studyCollapsed: false,
-        browserCollapsed: false,
-        lastDayStudied: 0,
-        newStudied: 0,
-        reviewStudied: 0,
-        millisecondsStudied: 0
-      });
-      const commonBytes = anki.DeckCommon.encode(common).finish();
-      
-      const kind = anki.DeckKindContainer.create({
-        normal: {
-          configId: deck.conf ?? 1,
-          extendNew: 10,
-          extendReview: 50,
-          description: deck.description || '',
-          markdownDescription: false
+
+      const notetypesIdIndex = meta?.notetypesColumns ? meta.notetypesColumns.indexOf('id') : -1;
+      const decksIdIndex = meta?.decksColumns ? meta.decksColumns.indexOf('id') : -1;
+
+      insertRows('notetypes', meta?.notetypesColumns, meta?.notetypesRows);
+      insertRows('fields', meta?.fieldsColumns, meta?.fieldsRows);
+      insertRows('templates', meta?.templatesColumns, meta?.templatesRows);
+      insertRows('decks', meta?.decksColumns, meta?.decksRows);
+      insertRows('deck_config', meta?.deckConfigColumns, meta?.deckConfigRows);
+      insertRows('config', meta?.configColumns, meta?.configRows);
+      insertRows('tags', meta?.tagsColumns, meta?.tagsRows);
+
+      // Append any new models/decks not present in original metadata
+      const metaModelIds = new Set((meta?.notetypesRows ?? []).map(row => Number(row[notetypesIdIndex])));
+      const metaDeckIdsSet = new Set((meta?.decksRows ?? []).map(row => Number(row[decksIdIndex])));
+
+      if (notetypesIdIndex !== -1) {
+        for (const [id, model] of collection.models) {
+          if (metaModelIds.has(id)) continue;
+          const notetypeConfig = anki.NotetypeConfig.create({
+            kind: model.type as anki.NotetypeConfig.Kind,
+            sortFieldIdx: model.sortField ?? 0,
+            css: model.css || '',
+            latexPre: model.latexPre || '\\documentclass[12pt]{article}\n\\special{papersize=3in,5in}\n\\usepackage{amssymb,amsmath}\n\\pagestyle{empty}\n\\setlength{\\parindent}{0in}\n\\begin{document}',
+            latexPost: model.latexPost || '\\end{document}',
+            latexSvg: false
+          });
+          const notetypeConfigBytes = anki.NotetypeConfig.encode(notetypeConfig).finish();
+          db.exec(`INSERT INTO notetypes VALUES (${id}, '${model.name.replace(/'/g, "''")}', ${now}, -1, x'${uint8ArrayToHex(notetypeConfigBytes)}')`);
+
+          for (const field of model.fields) {
+            const fieldConfig = anki.NoteFieldConfig.create({
+              sticky: field.sticky || false,
+              rtl: false,
+              fontName: 'Arial',
+              fontSize: 20,
+              description: '',
+              plainText: false,
+              collapsed: false,
+              excludeFromSearch: false
+            });
+            const fieldConfigBytes = anki.NoteFieldConfig.encode(fieldConfig).finish();
+            db.exec(`INSERT INTO fields VALUES (${id}, ${field.ordinal}, '${field.name.replace(/'/g, "''")}', x'${uint8ArrayToHex(fieldConfigBytes)}')`);
+          }
+
+          for (const tmpl of model.templates) {
+            const templateConfig = anki.CardTemplateConfig.create({
+              qFormat: tmpl.questionFormat,
+              aFormat: tmpl.answerFormat,
+              qFormatBrowser: '',
+              aFormatBrowser: '',
+              targetDeckId: 0,
+              browserFontName: '',
+              browserFontSize: 0
+            });
+            const templateConfigBytes = anki.CardTemplateConfig.encode(templateConfig).finish();
+            db.exec(`INSERT INTO templates VALUES (${id}, ${tmpl.ordinal}, '${tmpl.name.replace(/'/g, "''")}', ${now}, -1, x'${uint8ArrayToHex(templateConfigBytes)}')`);
+          }
         }
-      });
-      const kindBytes = anki.DeckKindContainer.encode(kind).finish();
+      }
+
+      if (decksIdIndex !== -1) {
+        for (const [id, deck] of collection.decks) {
+          if (metaDeckIdsSet.has(id)) continue;
+          const common = anki.DeckCommon.create({
+            studyCollapsed: false,
+            browserCollapsed: false,
+            lastDayStudied: 0,
+            newStudied: 0,
+            reviewStudied: 0,
+            millisecondsStudied: 0
+          });
+          const commonBytes = anki.DeckCommon.encode(common).finish();
+
+          const kind = anki.DeckKindContainer.create({
+            normal: {
+              configId: deck.conf ?? 1,
+              extendNew: 10,
+              extendReview: 50,
+              description: deck.description || '',
+              markdownDescription: false
+            }
+          });
+          const kindBytes = anki.DeckKindContainer.encode(kind).finish();
+
+          db.exec(`INSERT INTO decks VALUES (${id}, '${deck.name.replace(/'/g, "''")}', ${now}, -1, x'${uint8ArrayToHex(commonBytes)}', x'${uint8ArrayToHex(kindBytes)}')`);
+        }
+      }
+    } else {
+      // Insert empty col row (data is in separate tables)
+      db.exec(`
+        INSERT INTO col VALUES (
+          1,
+          ${now - 86400},
+          ${nowMs},
+          ${nowMs},
+          18,
+          0,
+          0,
+          0,
+          '',
+          '',
+          '',
+          '',
+          ''
+        )
+      `);
       
-      db.exec(`INSERT INTO decks VALUES (${id}, '${deck.name.replace(/'/g, "''")}', ${now}, -1, x'${uint8ArrayToHex(commonBytes)}', x'${uint8ArrayToHex(kindBytes)}')`);
+      // Insert notetypes, fields, and templates
+      for (const [id, model] of collection.models) {
+        // Encode notetype config
+        const notetypeConfig = anki.NotetypeConfig.create({
+          kind: model.type as anki.NotetypeConfig.Kind,
+          sortFieldIdx: model.sortField ?? 0,
+          css: model.css || '',
+          latexPre: model.latexPre || '\\documentclass[12pt]{article}\n\\special{papersize=3in,5in}\n\\usepackage{amssymb,amsmath}\n\\pagestyle{empty}\n\\setlength{\\parindent}{0in}\n\\begin{document}',
+          latexPost: model.latexPost || '\\end{document}',
+          latexSvg: false
+        });
+        const notetypeConfigBytes = anki.NotetypeConfig.encode(notetypeConfig).finish();
+        
+        db.exec(`INSERT INTO notetypes VALUES (${id}, '${model.name.replace(/'/g, "''")}', ${now}, -1, x'${uint8ArrayToHex(notetypeConfigBytes)}')`);
+        
+        // Insert fields
+        for (const field of model.fields) {
+          const fieldConfig = anki.NoteFieldConfig.create({
+            sticky: field.sticky || false,
+            rtl: false,
+            fontName: 'Arial',
+            fontSize: 20,
+            description: '',
+            plainText: false,
+            collapsed: false,
+            excludeFromSearch: false
+          });
+          const fieldConfigBytes = anki.NoteFieldConfig.encode(fieldConfig).finish();
+          
+          db.exec(`INSERT INTO fields VALUES (${id}, ${field.ordinal}, '${field.name.replace(/'/g, "''")}', x'${uint8ArrayToHex(fieldConfigBytes)}')`);
+        }
+        
+        // Insert templates
+        for (const tmpl of model.templates) {
+          const templateConfig = anki.CardTemplateConfig.create({
+            qFormat: tmpl.questionFormat,
+            aFormat: tmpl.answerFormat,
+            qFormatBrowser: '',
+            aFormatBrowser: '',
+            targetDeckId: 0,
+            browserFontName: '',
+            browserFontSize: 0
+          });
+          const templateConfigBytes = anki.CardTemplateConfig.encode(templateConfig).finish();
+          
+          db.exec(`INSERT INTO templates VALUES (${id}, ${tmpl.ordinal}, '${tmpl.name.replace(/'/g, "''")}', ${now}, -1, x'${uint8ArrayToHex(templateConfigBytes)}')`);
+        }
+      }
+      
+      // Insert decks
+      for (const [id, deck] of collection.decks) {
+        const common = anki.DeckCommon.create({
+          studyCollapsed: false,
+          browserCollapsed: false,
+          lastDayStudied: 0,
+          newStudied: 0,
+          reviewStudied: 0,
+          millisecondsStudied: 0
+        });
+        const commonBytes = anki.DeckCommon.encode(common).finish();
+        
+        const kind = anki.DeckKindContainer.create({
+          normal: {
+            configId: deck.conf ?? 1,
+            extendNew: 10,
+            extendReview: 50,
+            description: deck.description || '',
+            markdownDescription: false
+          }
+        });
+        const kindBytes = anki.DeckKindContainer.encode(kind).finish();
+        
+        db.exec(`INSERT INTO decks VALUES (${id}, '${deck.name.replace(/'/g, "''")}', ${now}, -1, x'${uint8ArrayToHex(commonBytes)}', x'${uint8ArrayToHex(kindBytes)}')`);
+      }
+      
+      // Insert default deck config
+      const deckConfig = anki.DeckConfigConfig.create({
+        learnSteps: [1, 10],
+        relearnSteps: [10],
+        newPerDay: 20,
+        reviewsPerDay: 200,
+        newPerDayMinimum: 0,
+        initialEase: 2.5,
+        easyMultiplier: 1.3,
+        hardMultiplier: 1.2,
+        lapseMultiplier: 0,
+        intervalMultiplier: 1.0,
+        maximumReviewInterval: 36500,
+        minimumLapseInterval: 1,
+        graduatingIntervalGood: 1,
+        graduatingIntervalEasy: 4,
+        leechThreshold: 8,
+        leechAction: anki.DeckConfigConfig.LeechAction.LEECH_ACTION_TAG_ONLY
+      });
+      const deckConfigBytes = anki.DeckConfigConfig.encode(deckConfig).finish();
+      db.exec(`INSERT INTO deck_config VALUES (1, 'Default', 0, 0, x'${uint8ArrayToHex(deckConfigBytes)}')`);
+      
+      // Insert config key-value pairs
+      // activeDecks: [1] encoded as JSON bytes
+      const activeDecks = new TextEncoder().encode('[1]');
+      db.exec(`INSERT INTO config VALUES ('activeDecks', 0, 0, x'${uint8ArrayToHex(activeDecks)}')`);
+      
+      // curDeck: 1 as int64 little-endian
+      const curDeck = new Uint8Array(8);
+      new DataView(curDeck.buffer).setBigInt64(0, 1n, true);
+      db.exec(`INSERT INTO config VALUES ('curDeck', 0, 0, x'${uint8ArrayToHex(curDeck)}')`);
+      
+      // creationOffset: local timezone offset
+      const tzOffset = new Date().getTimezoneOffset();
+      const creationOffset = new Int32Array([tzOffset]);
+      db.exec(`INSERT INTO config VALUES ('creationOffset', 0, 0, x'${uint8ArrayToHex(new Uint8Array(creationOffset.buffer))}')`);
+      
+      // localOffset: same as creation offset typically
+      db.exec(`INSERT INTO config VALUES ('localOffset', 0, 0, x'${uint8ArrayToHex(new Uint8Array(creationOffset.buffer))}')`);
     }
-    
-    // Insert default deck config
-    const deckConfig = anki.DeckConfigConfig.create({
-      learnSteps: [1, 10],
-      relearnSteps: [10],
-      newPerDay: 20,
-      reviewsPerDay: 200,
-      newPerDayMinimum: 0,
-      initialEase: 2.5,
-      easyMultiplier: 1.3,
-      hardMultiplier: 1.2,
-      lapseMultiplier: 0,
-      intervalMultiplier: 1.0,
-      maximumReviewInterval: 36500,
-      minimumLapseInterval: 1,
-      graduatingIntervalGood: 1,
-      graduatingIntervalEasy: 4,
-      leechThreshold: 8,
-      leechAction: anki.DeckConfigConfig.LeechAction.LEECH_ACTION_TAG_ONLY
-    });
-    const deckConfigBytes = anki.DeckConfigConfig.encode(deckConfig).finish();
-    db.exec(`INSERT INTO deck_config VALUES (1, 'Default', 0, 0, x'${uint8ArrayToHex(deckConfigBytes)}')`);
-    
-    // Insert config key-value pairs
-    // activeDecks: [1] encoded as JSON bytes
-    const activeDecks = new TextEncoder().encode('[1]');
-    db.exec(`INSERT INTO config VALUES ('activeDecks', 0, 0, x'${uint8ArrayToHex(activeDecks)}')`);
-    
-    // curDeck: 1 as int64 little-endian
-    const curDeck = new Uint8Array(8);
-    new DataView(curDeck.buffer).setBigInt64(0, 1n, true);
-    db.exec(`INSERT INTO config VALUES ('curDeck', 0, 0, x'${uint8ArrayToHex(curDeck)}')`);
-    
-    // creationOffset: local timezone offset
-    const tzOffset = new Date().getTimezoneOffset();
-    const creationOffset = new Int32Array([tzOffset]);
-    db.exec(`INSERT INTO config VALUES ('creationOffset', 0, 0, x'${uint8ArrayToHex(new Uint8Array(creationOffset.buffer))}')`);
-    
-    // localOffset: same as creation offset typically
-    db.exec(`INSERT INTO config VALUES ('localOffset', 0, 0, x'${uint8ArrayToHex(new Uint8Array(creationOffset.buffer))}')`);
     
   } else {
     reportProgress('Building schema', 5);
@@ -1583,23 +1860,27 @@ export async function exportCollection(
     if (!neededNoteIds.has(id)) continue;
     
     const flds = note.fields.join(FIELD_SEPARATOR);
-    const sfld = note.fields[0] || '';
+    const sfld = note.sfld ?? (note.fields[0] || '');
     const tags = note.tags.length > 0 ? ` ${note.tags.join(' ')} ` : '';
-    const csum = calculateFieldChecksumSync(sfld);
+    const csum = note.csum ?? calculateFieldChecksumSync(sfld);
+    const noteUsn = note.usn ?? -1;
+    const noteFlags = note.flags ?? 0;
+    const noteData = note.data ?? '';
+    const noteMod = note.mod ?? now;
     
     db.exec(`
       INSERT INTO notes VALUES (
         ${id},
         '${note.guid.replace(/'/g, "''")}',
         ${note.modelId},
-        ${note.mod},
-        -1,
+        ${noteMod},
+        ${noteUsn},
         '${tags.replace(/'/g, "''")}',
         '${flds.replace(/'/g, "''")}',
         '${sfld.replace(/'/g, "''")}',
         ${csum},
-        0,
-        ''
+        ${noteFlags},
+        '${noteData.replace(/'/g, "''")}'
       )
     `);
 
@@ -1618,6 +1899,10 @@ export async function exportCollection(
     } else if (card.queue === CARD_QUEUE.REVIEW || card.interval > 0) {
       ankiType = CARD_TYPE.REVIEW;
     }
+
+    const cardMod = card.mod ?? now;
+    const cardUsn = card.usn ?? -1;
+    const cardData = card.data ?? '';
     
     db.exec(`
       INSERT INTO cards VALUES (
@@ -1625,8 +1910,8 @@ export async function exportCollection(
         ${card.noteId},
         ${card.deckId},
         ${card.ordinal},
-        ${now},
-        -1,
+        ${cardMod},
+        ${cardUsn},
         ${ankiType},
         ${card.queue},
         ${card.due},
@@ -1638,7 +1923,7 @@ export async function exportCollection(
         ${card.odue ?? 0},
         ${card.odid ?? 0},
         ${card.flags ?? 0},
-        ''
+        '${cardData.replace(/'/g, "''")}'
       )
     `);
 
@@ -1699,8 +1984,11 @@ export async function exportCollection(
     
     // Create a SEPARATE legacy database for collection.anki2 (backward compatibility)
     // Anki's modern format includes both: anki21b (modern/actual) and anki2 (legacy/fallback)
-    const legacyDb = new sql.Database();
-    createLegacySchema(legacyDb);
+    if (collection.sourceLegacyDb) {
+      zip.file('collection.anki2', collection.sourceLegacyDb);
+    } else {
+      const legacyDb = new sql.Database();
+      createLegacySchema(legacyDb);
     
     // Build models JSON for legacy format
     const modelsObj: Record<string, unknown> = {};
@@ -1793,22 +2081,26 @@ export async function exportCollection(
     for (const [id, note] of collection.notes) {
       if (!neededNoteIds.has(id)) continue;
       const flds = note.fields.join(FIELD_SEPARATOR);
-      const sfld = note.fields[0] || '';
+      const sfld = note.sfld ?? (note.fields[0] || '');
       const tags = note.tags.length > 0 ? ` ${note.tags.join(' ')} ` : '';
-      const csum = calculateFieldChecksumSync(sfld);
+      const csum = note.csum ?? calculateFieldChecksumSync(sfld);
+      const noteUsn = note.usn ?? -1;
+      const noteFlags = note.flags ?? 0;
+      const noteData = note.data ?? '';
+      const noteMod = note.mod ?? now;
       legacyDb.exec(`
         INSERT INTO notes VALUES (
           ${id},
           '${note.guid.replace(/'/g, "''")}',
           ${note.modelId},
-          ${note.mod},
-          -1,
+          ${noteMod},
+          ${noteUsn},
           '${tags.replace(/'/g, "''")}',
           '${flds.replace(/'/g, "''")}',
           '${sfld.replace(/'/g, "''")}',
           ${csum},
-          0,
-          ''
+          ${noteFlags},
+          '${noteData.replace(/'/g, "''")}'
         )
       `);
     }
@@ -1821,14 +2113,18 @@ export async function exportCollection(
       } else if (card.queue === CARD_QUEUE.REVIEW || card.interval > 0) {
         ankiType = CARD_TYPE.REVIEW;
       }
-      legacyDb.exec(`
+      const cardMod = card.mod ?? now;
+      const cardUsn = card.usn ?? -1;
+      const cardData = card.data ?? '';
+
+        legacyDb.exec(`
         INSERT INTO cards VALUES (
           ${card.id},
           ${card.noteId},
           ${card.deckId},
           ${card.ordinal},
-          ${now},
-          -1,
+          ${cardMod},
+          ${cardUsn},
           ${ankiType},
           ${card.queue},
           ${card.due},
@@ -1840,7 +2136,7 @@ export async function exportCollection(
           ${card.odue ?? 0},
           ${card.odid ?? 0},
           ${card.flags ?? 0},
-          ''
+          '${cardData.replace(/'/g, "''")}'
         )
       `);
     }
@@ -1865,11 +2161,12 @@ export async function exportCollection(
       }
     }
     
-    const legacyDbData = legacyDb.export();
-    legacyDb.close();
-    
-    // Include the legacy database for compatibility
-    zip.file('collection.anki2', legacyDbData);
+      const legacyDbData = legacyDb.export();
+      legacyDb.close();
+      
+      // Include the legacy database for compatibility
+      zip.file('collection.anki2', legacyDbData);
+    }
     
     // Add media files (zstd compressed)
     reportProgress('Processing media', 80);

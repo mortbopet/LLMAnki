@@ -201,7 +201,7 @@ const DeckNode: React.FC<DeckNodeProps> = ({
                         </button>
                     </div>
                 ) : (
-                    <span className="flex-1 truncate text-sm">{displayName}</span>
+                    <span className="flex-1 truncate text-sm" title={deck.name}>{displayName}</span>
                 )}
 
                 {isAnalyzing && (

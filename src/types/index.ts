@@ -22,6 +22,10 @@ export interface AnkiCard {
   factor: number;
   reps: number;
   lapses: number;
+  /** Card modification time (epoch seconds) */
+  mod?: number;
+  /** Update sequence number */
+  usn?: number;
   /** Learning steps left: a*1000+b where a=reps today, b=reps till graduation */
   left: number;
   /** Original due date - used for filtered decks or scheduler migration */
@@ -30,6 +34,8 @@ export interface AnkiCard {
   odid: number;
   /** Flags: value mod 8 gives color (0=none, 1=red, 2=orange, 3=green, 4=blue) */
   flags: number;
+  /** Extra card data (JSON string in modern schema) */
+  data?: string;
 }
 
 // Review log entry from revlog table
@@ -51,6 +57,16 @@ export interface AnkiNote {
   tags: string[];
   guid: string;
   mod: number;
+  /** Update sequence number */
+  usn?: number;
+  /** Sort field (cached) */
+  sfld?: string;
+  /** Checksum of sort field */
+  csum?: number;
+  /** Flags field */
+  flags?: number;
+  /** Extra note data */
+  data?: string;
 }
 
 export interface AnkiModel {
@@ -111,6 +127,27 @@ export interface AnkiCollection {
   schemaFormat?: AnkiSchemaFormat;
   /** Original APKG bytes for optional strict passthrough export */
   sourceApkg?: Blob;
+  /** Original legacy DB bytes (collection.anki2) when present */
+  sourceLegacyDb?: Uint8Array;
+  /** Raw modern-schema rows to preserve full metadata on re-export */
+  modernMeta?: {
+    colColumns?: string[];
+    colRow?: unknown[];
+    notetypesColumns?: string[];
+    notetypesRows?: unknown[][];
+    fieldsColumns?: string[];
+    fieldsRows?: unknown[][];
+    templatesColumns?: string[];
+    templatesRows?: unknown[][];
+    decksColumns?: string[];
+    decksRows?: unknown[][];
+    deckConfigColumns?: string[];
+    deckConfigRows?: unknown[][];
+    configColumns?: string[];
+    configRows?: unknown[][];
+    tagsColumns?: string[];
+    tagsRows?: unknown[][];
+  };
 }
 
 // Rendered card for display

@@ -1849,6 +1849,155 @@ describe('APKG Round-Trip Tests', () => {
         expect(Array.from(expDecompressed)).toEqual(Array.from(refDecompressed));
       }
     });
+
+    it('DIAGNOSTIC: should preserve revlog rows when exporting test_deck.apkg', async () => {
+      const fs = await import('fs');
+      const path = await import('path');
+      const JSZip = (await import('jszip')).default;
+      const { decompress } = await import('fzstd');
+      const initSqlJs = (await import('sql.js')).default;
+
+      const referencePath = path.join(__dirname, 'test_deck.apkg');
+      const referenceData = fs.readFileSync(referencePath);
+      const referenceFile = new File([referenceData], 'test_deck.apkg');
+
+      const collection = await parseApkgFile(referenceFile);
+      console.log('Parsed revlog entries:', collection.revlog.size);
+      const firstCard = Array.from(collection.cards.values())[0];
+      if (firstCard) {
+        console.log('Parsed card mod:', firstCard.mod);
+        console.log('Parsed card usn:', firstCard.usn);
+        console.log('Parsed card data:', firstCard.data);
+      }
+
+      const exportedBlob = await exportCollection(collection, { mediaFormat: 'modern' });
+      const exportedZip = await JSZip.loadAsync(exportedBlob);
+
+      const refZip = await JSZip.loadAsync(referenceData);
+      const refDb21b = await refZip.file('collection.anki21b')?.async('uint8array');
+      const expDb21b = await exportedZip.file('collection.anki21b')?.async('uint8array');
+      const refDb2 = await refZip.file('collection.anki2')?.async('uint8array');
+      const expDb2 = await exportedZip.file('collection.anki2')?.async('uint8array');
+
+      expect(refDb21b).toBeDefined();
+      expect(expDb21b).toBeDefined();
+      expect(refDb2).toBeDefined();
+      expect(expDb2).toBeDefined();
+
+      const refDbBytes = decompress(refDb21b!);
+      const expDbBytes = decompress(expDb21b!);
+      const refDb2Bytes = refDb2!;
+      const expDb2Bytes = expDb2!;
+
+      const SQL = await initSqlJs();
+      const refDb = new SQL.Database(refDbBytes);
+      const expDb = new SQL.Database(expDbBytes);
+
+      const refRevlogSchema = refDb.exec('PRAGMA table_info(revlog)');
+      const expRevlogSchema = expDb.exec('PRAGMA table_info(revlog)');
+      console.log('Reference revlog columns:', refRevlogSchema[0]?.values.map(r => r[1]).join(', '));
+      console.log('Exported revlog columns:', expRevlogSchema[0]?.values.map(r => r[1]).join(', '));
+
+      const refTagsSchema = refDb.exec('PRAGMA table_info(tags)');
+      console.log('Reference tags columns:', refTagsSchema[0]?.values.map(r => r[1]).join(', '));
+
+      try {
+        const tagsCols = refTagsSchema[0]?.values.map(r => `"${r[1]}"`).join(', ');
+        const tagsRows = refDb.exec(`SELECT ${tagsCols} FROM "tags"`);
+        console.log('Reference tags rows:', tagsRows[0]?.values?.length ?? 0);
+      } catch (e) {
+        console.log('Reference tags SELECT failed:', (e as Error).message);
+      }
+
+      const refRevlog = refDb.exec('SELECT COUNT(*) FROM revlog');
+      const expRevlog = expDb.exec('SELECT COUNT(*) FROM revlog');
+
+      const refRevlogLinked = refDb.exec('SELECT COUNT(*) FROM revlog r INNER JOIN cards c ON r.cid = c.id');
+      const expRevlogLinked = expDb.exec('SELECT COUNT(*) FROM revlog r INNER JOIN cards c ON r.cid = c.id');
+
+      const refConfigCount = refDb.exec('SELECT COUNT(*) FROM config');
+      const expConfigCount = expDb.exec('SELECT COUNT(*) FROM config');
+
+      const refDeckConfigCount = refDb.exec('SELECT COUNT(*) FROM deck_config');
+      const expDeckConfigCount = expDb.exec('SELECT COUNT(*) FROM deck_config');
+
+      const refColRow = refDb.exec('SELECT * FROM col');
+      const expColRow = expDb.exec('SELECT * FROM col');
+
+      if (refColRow[0]?.values?.length && expColRow[0]?.values?.length) {
+        console.log('Reference col row (first 6):', JSON.stringify(refColRow[0].values[0].slice(0, 6)));
+        console.log('Exported col row (first 6):', JSON.stringify(expColRow[0].values[0].slice(0, 6)));
+      }
+
+      const getConfigValue = (db: any, key: string) => {
+        try {
+          const rows = db.exec(`SELECT val FROM config WHERE key = '${key}' OR KEY = '${key}'`);
+          const value = rows[0]?.values?.[0]?.[0];
+          if (value instanceof Uint8Array) {
+            return Array.from(value).map(b => b.toString(16).padStart(2, '0')).join('');
+          }
+          return value;
+        } catch {
+          return undefined;
+        }
+      };
+
+      console.log('Reference creationOffset:', getConfigValue(refDb, 'creationOffset'));
+      console.log('Exported creationOffset:', getConfigValue(expDb, 'creationOffset'));
+      console.log('Reference localOffset:', getConfigValue(refDb, 'localOffset'));
+      console.log('Exported localOffset:', getConfigValue(expDb, 'localOffset'));
+      console.log('Reference schedVer:', getConfigValue(refDb, 'schedVer'));
+      console.log('Exported schedVer:', getConfigValue(expDb, 'schedVer'));
+
+      const refRevlogRows = refDb.exec('SELECT id, cid, ease, ivl, lastIvl, factor, time, type FROM revlog ORDER BY id ASC');
+      const expRevlogRows = expDb.exec('SELECT id, cid, ease, ivl, lastIvl, factor, time, type FROM revlog ORDER BY id ASC');
+
+      if (refRevlogRows[0]?.values?.length) {
+        console.log('Reference revlog first rows:', JSON.stringify(refRevlogRows[0].values.slice(0, 5)));
+      }
+      if (expRevlogRows[0]?.values?.length) {
+        console.log('Exported revlog first rows:', JSON.stringify(expRevlogRows[0].values.slice(0, 5)));
+      }
+
+      const refCardRows = refDb.exec('SELECT id, did, ord, type, queue, due, ivl, factor, reps, lapses, left FROM cards ORDER BY id ASC');
+      const expCardRows = expDb.exec('SELECT id, did, ord, type, queue, due, ivl, factor, reps, lapses, left FROM cards ORDER BY id ASC');
+
+      if (refCardRows[0]?.values?.length) {
+        console.log('Reference cards first rows:', JSON.stringify(refCardRows[0].values.slice(0, 5)));
+      }
+      if (expCardRows[0]?.values?.length) {
+        console.log('Exported cards first rows:', JSON.stringify(expCardRows[0].values.slice(0, 5)));
+      }
+
+      const refCount = refRevlog[0]?.values?.[0]?.[0] ?? 0;
+      const expCount = expRevlog[0]?.values?.[0]?.[0] ?? 0;
+
+      const refLinked = refRevlogLinked[0]?.values?.[0]?.[0] ?? 0;
+      const expLinked = expRevlogLinked[0]?.values?.[0]?.[0] ?? 0;
+
+      const refConfig = refConfigCount[0]?.values?.[0]?.[0] ?? 0;
+      const expConfig = expConfigCount[0]?.values?.[0]?.[0] ?? 0;
+
+      const refDeckConfig = refDeckConfigCount[0]?.values?.[0]?.[0] ?? 0;
+      const expDeckConfig = expDeckConfigCount[0]?.values?.[0]?.[0] ?? 0;
+
+      console.log('Reference revlog rows:', refCount);
+      console.log('Exported revlog rows:', expCount);
+      console.log('Reference revlog linked rows:', refLinked);
+      console.log('Exported revlog linked rows:', expLinked);
+      console.log('Reference config rows:', refConfig);
+      console.log('Exported config rows:', expConfig);
+      console.log('Reference deck_config rows:', refDeckConfig);
+      console.log('Exported deck_config rows:', expDeckConfig);
+
+      expect(expCount).toBe(refCount);
+      expect(expLinked).toBe(refLinked);
+      expect(expConfig).toBe(refConfig);
+      expect(expDeckConfig).toBe(refDeckConfig);
+
+      await compareSqliteDatabases(refDbBytes, expDbBytes, 'collection.anki21b');
+      await compareSqliteDatabases(refDb2Bytes, expDb2Bytes, 'collection.anki2');
+    });
   });
 });
 
@@ -1859,7 +2008,7 @@ async function compareSqliteDatabases(refData: Uint8Array, expData: Uint8Array, 
   const initSqlJs = (await import('sql.js')).default;
   const SQL = await initSqlJs();
   
-  let refDb, expDb;
+  let refDb: any, expDb: any;
   try {
     refDb = new SQL.Database(refData);
     expDb = new SQL.Database(expData);
@@ -1868,8 +2017,8 @@ async function compareSqliteDatabases(refData: Uint8Array, expData: Uint8Array, 
     const refTables = refDb.exec("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name");
     const expTables = expDb.exec("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name");
     
-    const refTableNames = refTables[0]?.values.map(v => v[0] as string) || [];
-    const expTableNames = expTables[0]?.values.map(v => v[0] as string) || [];
+    const refTableNames = refTables[0]?.values.map((v: any[]) => v[0] as string) || [];
+    const expTableNames = expTables[0]?.values.map((v: any[]) => v[0] as string) || [];
     
     console.log(`  ${filename} reference tables:`, refTableNames);
     console.log(`  ${filename} exported tables:`, expTableNames);
@@ -1881,8 +2030,25 @@ async function compareSqliteDatabases(refData: Uint8Array, expData: Uint8Array, 
         continue;
       }
       
-      const refRows = refDb.exec(`SELECT * FROM "${tableName}"`);
-      const expRows = expDb.exec(`SELECT * FROM "${tableName}"`);
+      const getColumns = (db: any) => {
+        const schema = db.exec(`PRAGMA table_info("${tableName}")`);
+        return schema[0]?.values?.map((v: any[]) => String(v[1])) ?? [];
+      };
+
+      const refCols = getColumns(refDb);
+      const expCols = getColumns(expDb);
+      const refSelect = refCols.length > 0 ? refCols.map((c: string) => `"${c}"`).join(', ') : '*';
+      const expSelect = expCols.length > 0 ? expCols.map((c: string) => `"${c}"`).join(', ') : '*';
+
+      let refRows;
+      let expRows;
+      try {
+        refRows = refDb.exec(`SELECT ${refSelect} FROM "${tableName}"`);
+        expRows = expDb.exec(`SELECT ${expSelect} FROM "${tableName}"`);
+      } catch (e) {
+        console.warn(`  Table ${tableName} could not be read in sql.js:`, (e as Error).message);
+        continue;
+      }
       
       const refCount = refRows[0]?.values.length || 0;
       const expCount = expRows[0]?.values.length || 0;
