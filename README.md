@@ -8,9 +8,9 @@ LLMAnki is a web application that helps you improve your Anki flashcards using L
 - **🌳 Deck Browser**: Navigate through your deck hierarchy and subdecks
 - **📇 Card Viewer**: View all card types (Basic, Cloze, Basic Reversed, etc.)
 - **🤖 AI Analysis**:
-    * Get feedback on card quality based a configurable card evaluation prompt
-    * Get suggestions for new and/or replacement cards
-    * Generate deck-wide analyses, such as deck score, and deck "knowledge coverage"; an attempt to qualitatively determine if your deck covers its subject matter well.
+    * Get feedback on card quality based on a configurable card evaluation prompt;
+    * Get suggestions for new and/or replacement cards;
+    * Generate deck-wide analyses, such as deck score, and deck "knowledge coverage" - an attempt to qualitatively determine if your deck covers its subject matter well;
     * Based on the deck-level analysis, generate new cards to "fill in the gaps" of the deck.
 - **✏️ Card Editor**: Edit suggested cards before committing with rich text support
 - **🔄 Multiple LLM Providers**: Choose from OpenAI, Anthropic, Groq, Together AI, OpenRouter
@@ -31,14 +31,14 @@ The app has mainly been tested using Groq's free tier, so using other models may
 4. **Analyze**: Click "Analyze" to get feedback and suggested alternative cards
 5. **Review & Edit**: Review suggestions, edit if needed, and add new suggested cards
 6. **Export**: Download your modified deck
-7. **Re-import to Anki**: Start the Anki app on your computer, press `File->Import`, and select the modified `.apkg` file
+7. **Re-import to Anki**: Start the Anki app on your computer, press `File->Import`, and select the exported `.apkg` file.
     * Remember to select:
-      * "Import any learning progress"
-      * "Import any deck presets"
+      * ✅ "Import any learning progress"
+      * ✅ "Import any deck presets"
     * Do not select:
-      * "Merge note types"
+      * ❌ "Merge note types"
     * This will **merge** any _new_ cards from the imported deck to your collection.
-    * This will **not** remove any cards. When you export a deck from LLMAnki, and you have cards marked for deletion, a filter string will be shown to you. This filter can then be copied into the Anki app, showing you all of the cards marked for deletion (which you can then manually bulk-delete).
+    * This will **not** remove any cards. When you export a deck from LLMAnki, and you have cards marked for deletion, a filter string will be shown to you. This filter string can then be copied into the Anki app's card browser, showing you all of the cards which you marked for deletion (which can then be manually bulk-deleted).
 
 ⚠️ Note: Always back up your Anki collection before importing modified decks! ⚠️.  
 This app is **highly experimental** and thus provides no guarantees of the integrity of the exported deck. However, as mentioned in 8. above, Anki doesn't do destructive edits on imports, so your decks should be pretty safe.
