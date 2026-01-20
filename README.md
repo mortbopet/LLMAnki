@@ -24,18 +24,23 @@ The app has mainly been tested using Groq's free tier, so using other models may
 
 
 1. **Export from Anki**: In the Anki app, select a deck for export
-  - Select format "Anki Deck Package (.apkg)
-  - Remember to select "Include scheduling information", "Include deck presets" and "Include media" for the best experience
-2. **Load a Deck**: Click "Load .apkg" to import your Anki deck
+    * Select format "Anki Deck Package (.apkg)
+    * Remember to select "Include scheduling information", "Include deck presets" and "Include media" for the best experience
+2. **Load a Deck**: Click "Load .apkg" to import your Anki deck into LLMAnki
 3. **Browse Cards**: Select a deck from the sidebar, then click on a card
 4. **Analyze**: Click "Analyze" to get feedback and suggested alternative cards
 5. **Review & Edit**: Review suggestions, edit if needed, and add new suggested cards
 6. **Export**: Download your modified deck
 7. **Re-import to Anki**: Start the Anki app on your computer, press `File->Import`, and select the modified `.apkg` file
-  * This will **merge** any _new_ cards from the imported deck to your collection.
-  * This will **not** remove any cards. When you export a deck from LLMAnki, and you have cards marked for deletion, a filter string will be shown to you. This filter can then be copied into the Anki app, showing you all of the cards marked for deletion (which you can then manually bulk-delete).
+    * Remember to select:
+      * "Import any learning progress"
+      * "Import any deck presets"
+    * Do not select:
+      * "Merge note types"
+    * This will **merge** any _new_ cards from the imported deck to your collection.
+    * This will **not** remove any cards. When you export a deck from LLMAnki, and you have cards marked for deletion, a filter string will be shown to you. This filter can then be copied into the Anki app, showing you all of the cards marked for deletion (which you can then manually bulk-delete).
 
-⚠️ Note: Always back up your Anki collection before importing modified decks! ⚠️
+⚠️ Note: Always back up your Anki collection before importing modified decks! ⚠️.  
 This app is **highly experimental** and thus provides no guarantees of the integrity of the exported deck. However, as mentioned in 8. above, Anki doesn't do destructive edits on imports, so your decks should be pretty safe.
 
 ## Supported LLM Providers
@@ -62,6 +67,8 @@ This app is **highly experimental** and thus provides no guarantees of the integ
 The AI evaluates cards based on these principles. They are encoded into the system prompt that is sent to the LLM alongside the card content.
 The system prompt can be adjusted in the settings to tailor the analysis to your own preferences.
 
+The default system prompt is built around evaluating a card given the following criteria:
+
 ### 1. Unambiguous
 The question should have only one reasonable answer. Avoid vague or open-ended questions.
 
@@ -73,6 +80,8 @@ Cards should connect to the original context where you learned the information.
 
 ### 4. Active Recall
 Cards should require genuine recall, not just recognition. The answer shouldn't be guessable from the question.
+
+The system prompt contains a specification of a JSON schema which the LLM should return its answer in, s.t., LLMAnki is able to parse and provide UI elements for the response. When modifying the system prompt **do not change or remove this part**.
 
 ### Card Type Guidelines
 
