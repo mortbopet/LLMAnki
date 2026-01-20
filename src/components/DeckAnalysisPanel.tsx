@@ -136,11 +136,11 @@ const KnowledgeCoverageSection: React.FC<{ coverage: KnowledgeCoverage }> = ({ c
 export const DeckAnalysisPanel: React.FC<DeckAnalysisPanelProps> = ({ result }) => {
     const addCard = useAppStore(state => state.addCard);
     const selectedDeckId = useAppStore(state => state.selectedDeckId);
-    const llmConfig = useAppStore(state => state.llmConfig);
+    const displaySettings = useAppStore(state => state.displaySettings);
     const markDeckSuggestedCardAdded = useAppStore(state => state.markDeckSuggestedCardAdded);
 
     // Get layout preference (default to carousel for backwards compatibility)
-    const suggestedCardsLayout = llmConfig.suggestedCardsLayout || 'carousel';
+    const suggestedCardsLayout = displaySettings.suggestedCardsLayout || 'carousel';
 
     // Track which cards have been added
     const addedIndices = result.addedSuggestedCardIndices || [];

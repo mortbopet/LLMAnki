@@ -1,6 +1,6 @@
 import React, { useMemo, useCallback, useState, useRef } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { CreditCard, Tag, Layers, Search, X, CheckCircle, AlertCircle, Wand2, Trash2, Undo2, ArrowUpDown, ChevronDown, Pencil, RotateCcw } from 'lucide-react';
+import { CreditCard, Tag, Layers, Search, X, CheckCircle, AlertCircle, Wand2, Trash2, Undo2, ArrowUpDown, ChevronDown, Pencil } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 import { renderCard, getCardTypeName } from '../utils/cardRenderer';
 import { getCardsInDeck } from '../utils/ankiParser';
@@ -20,7 +20,6 @@ interface CardListItemProps {
     onMarkForDeletion: (id: number) => void;
     onUnmarkForDeletion: (id: number) => void;
     onDeleteCard: (id: number) => void;
-    onRestoreEdits: (noteId: number) => void;
 }
 
 const CardListItem: React.FC<CardListItemProps> = ({
@@ -35,11 +34,9 @@ const CardListItem: React.FC<CardListItemProps> = ({
     onSelect,
     onMarkForDeletion,
     onUnmarkForDeletion,
-    onDeleteCard,
-    onRestoreEdits
+    onDeleteCard
 }) => {
     const [hovered, setHovered] = useState(false);
-    const [editedBadgeHovered, setEditedBadgeHovered] = useState(false);
 
     const handleDelete = (e: React.MouseEvent) => {
         e.stopPropagation();
@@ -54,11 +51,6 @@ const CardListItem: React.FC<CardListItemProps> = ({
     const handleRestore = (e: React.MouseEvent) => {
         e.stopPropagation();
         onUnmarkForDeletion(card.id);
-    };
-
-    const handleRestoreEdits = (e: React.MouseEvent) => {
-        e.stopPropagation();
-        onRestoreEdits(card.noteId);
     };
 
     return (
@@ -109,25 +101,12 @@ const CardListItem: React.FC<CardListItemProps> = ({
                             <span className="text-xs text-red-400 flex-shrink-0">Delete</span>
                         )}
                         {isEdited && !isMarkedForDeletion && (
-                            <button
-                                onClick={handleRestoreEdits}
-                                onMouseEnter={() => setEditedBadgeHovered(true)}
-                                onMouseLeave={() => setEditedBadgeHovered(false)}
-                                className={`flex items-center gap-0.5 text-xs flex-shrink-0 px-1 py-0.5 rounded transition-colors ${editedBadgeHovered
-                                    ? 'text-blue-400 bg-blue-900/40 hover:bg-blue-800/60'
-                                    : 'text-yellow-400'
-                                    }`}
-                                title={editedBadgeHovered ? "Restore original content" : "Card has been edited"}
+                            <span
+                                className="flex items-center text-xs flex-shrink-0 px-1 py-0.5 text-yellow-400"
+                                title="Card has been edited"
                             >
-                                {editedBadgeHovered ? (
-                                    <>
-                                        <RotateCcw className="w-3 h-3" />
-                                        <span>Restore</span>
-                                    </>
-                                ) : (
-                                    <Pencil className="w-3 h-3" />
-                                )}
-                            </button>
+                                <Pencil className="w-3 h-3" />
+                            </span>
                         )}
                         {isGenerated && !isMarkedForDeletion && (
                             <span className="text-xs text-purple-400 flex-shrink-0">New</span>
@@ -181,7 +160,6 @@ export const CardList: React.FC = () => {
     const persistedCardState = useAppStore(state => state.persistedCardState);
     const deleteCard = useAppStore(state => state.deleteCard);
     const restoreCard = useAppStore(state => state.restoreCard);
-    const restoreCardFields = useAppStore(state => state.restoreCardFields);
     const getCard = useAppStore(state => state.getCard);
 
     // Compute analysisCache from both cards Map and persistedCardState
@@ -283,7 +261,7 @@ export const CardList: React.FC = () => {
 
         const renderCardsAsync = async () => {
             const rendered = new Map<number, RenderedCard>();
-            for (const card of allCards.slice(0, 200)) { // Limit to first 200 for performance
+            for (const card of allCards) {
                 try {
                     const rc = await renderCard(collection, card);
                     rendered.set(card.id, rc);
@@ -491,7 +469,6 @@ export const CardList: React.FC = () => {
                                     onMarkForDeletion={deleteCard}
                                     onUnmarkForDeletion={restoreCard}
                                     onDeleteCard={deleteCard}
-                                    onRestoreEdits={restoreCardFields}
                                 />
                             </div>
                         );

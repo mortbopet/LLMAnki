@@ -1,22 +1,36 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Settings, X, RotateCcw, Key, Server, MessageSquare, Info, ExternalLink, Image, Layers, Zap, RefreshCw, Loader2, Clock, LayoutGrid, Cpu, SlidersHorizontal, Monitor, History, Sun, Moon, Database, Trash2 } from 'lucide-react';
+import { Settings, X, RotateCcw, Key, Server, MessageSquare, Info, ExternalLink, Image, Layers, Zap, RefreshCw, Loader2, Clock, LayoutGrid, Cpu, SlidersHorizontal, Monitor, History, Sun, Moon, Database, Trash2, Download, FileArchive } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 import { LLM_PROVIDERS, DEFAULT_SYSTEM_PROMPT, PROVIDER_INFO, SYSTEM_PROMPT_VERSION, fetchProviderModels, clearModelCache, type ModelInfo } from '../utils/llmService';
 import { clearAllCaches, formatBytes, getGlobalCacheStats } from '../utils/analysisCache';
-import type { LLMConfig } from '../types';
+import type { LLMConfig, AnkiSettings, DisplaySettings } from '../types';
 
-type SettingsTab = 'provider' | 'analysis' | 'display' | 'caching';
+type SettingsTab = 'provider' | 'analysis' | 'display' | 'anki' | 'caching';
 
 export const SettingsPanel: React.FC = () => {
     const showSettings = useAppStore(state => state.showSettings);
     const setShowSettings = useAppStore(state => state.setShowSettings);
     const llmConfig = useAppStore(state => state.llmConfig);
     const setLLMConfig = useAppStore(state => state.setLLMConfig);
+    const ankiSettings = useAppStore(state => state.ankiSettings);
+    const setAnkiSettings = useAppStore(state => state.setAnkiSettings);
+    const displaySettings = useAppStore(state => state.displaySettings);
+    const setDisplaySettings = useAppStore(state => state.setDisplaySettings);
 
     // Helper to update config immediately
     const updateConfig = useCallback((updates: Partial<LLMConfig>) => {
         setLLMConfig({ ...llmConfig, ...updates });
     }, [llmConfig, setLLMConfig]);
+
+    // Helper to update Anki settings
+    const updateAnkiSettings = useCallback((updates: Partial<AnkiSettings>) => {
+        setAnkiSettings({ ...ankiSettings, ...updates });
+    }, [ankiSettings, setAnkiSettings]);
+
+    // Helper to update Display settings
+    const updateDisplaySettings = useCallback((updates: Partial<DisplaySettings>) => {
+        setDisplaySettings({ ...displaySettings, ...updates });
+    }, [displaySettings, setDisplaySettings]);
     const [showProviderInfo, setShowProviderInfo] = useState(false);
     const [availableModels, setAvailableModels] = useState<ModelInfo[]>([]);
     const [isLoadingModels, setIsLoadingModels] = useState(false);
@@ -149,6 +163,16 @@ export const SettingsPanel: React.FC = () => {
                     >
                         <Monitor className="w-4 h-4" />
                         Display
+                    </button>
+                    <button
+                        onClick={() => setActiveTab('anki')}
+                        className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors ${activeTab === 'anki'
+                            ? 'text-blue-400 border-b-2 border-blue-400 bg-gray-800/50'
+                            : 'text-gray-400 hover:text-gray-300 hover:bg-gray-700/50'
+                            }`}
+                    >
+                        <FileArchive className="w-4 h-4" />
+                        Anki
                     </button>
                     <button
                         onClick={() => setActiveTab('caching')}
@@ -415,13 +439,13 @@ export const SettingsPanel: React.FC = () => {
                             <div>
                                 <label className="flex items-center gap-3 cursor-pointer">
                                     <div className="flex items-center gap-2 text-sm font-medium text-gray-300">
-                                        {llmConfig.darkMode !== false ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4" />}
+                                        {displaySettings.darkMode !== false ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4" />}
                                         Dark Mode
                                     </div>
                                     <input
                                         type="checkbox"
-                                        checked={llmConfig.darkMode !== false}
-                                        onChange={(e) => updateConfig({ darkMode: e.target.checked })}
+                                        checked={displaySettings.darkMode !== false}
+                                        onChange={(e) => updateDisplaySettings({ darkMode: e.target.checked })}
                                         className="rounded border-gray-600 bg-gray-700 text-blue-500 focus:ring-blue-500"
                                     />
                                 </label>
@@ -437,8 +461,8 @@ export const SettingsPanel: React.FC = () => {
                                     Suggested Cards Layout
                                 </label>
                                 <select
-                                    value={llmConfig.suggestedCardsLayout || 'carousel'}
-                                    onChange={(e) => updateConfig({ suggestedCardsLayout: e.target.value as 'carousel' | 'list' })}
+                                    value={displaySettings.suggestedCardsLayout || 'carousel'}
+                                    onChange={(e) => updateDisplaySettings({ suggestedCardsLayout: e.target.value as 'carousel' | 'list' })}
                                     className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                                 >
                                     <option value="carousel">Carousel (swipe through cards)</option>
@@ -448,7 +472,12 @@ export const SettingsPanel: React.FC = () => {
                                     Choose how suggested replacement cards are displayed. Carousel shows one card at a time with navigation; List shows all cards stacked vertically.
                                 </p>
                             </div>
+                        </>
+                    )}
 
+                    {/* Anki Tab */}
+                    {activeTab === 'anki' && (
+                        <>
                             {/* Inherit Card Metadata */}
                             <div>
                                 <label className="flex items-center gap-3 cursor-pointer">
@@ -458,13 +487,39 @@ export const SettingsPanel: React.FC = () => {
                                     </div>
                                     <input
                                         type="checkbox"
-                                        checked={llmConfig.inheritCardMetadata || false}
-                                        onChange={(e) => updateConfig({ inheritCardMetadata: e.target.checked })}
+                                        checked={ankiSettings.inheritCardMetadata || false}
+                                        onChange={(e) => updateAnkiSettings({ inheritCardMetadata: e.target.checked })}
                                         className="rounded border-gray-600 bg-gray-700 text-blue-500 focus:ring-blue-500"
                                     />
                                 </label>
                                 <p className="mt-1 text-xs text-gray-400">
                                     When adding a suggested replacement card, inherit the scheduling metadata (interval, ease factor, repetitions, lapses) from the original card. By default, new cards start fresh with no review history.
+                                </p>
+                            </div>
+
+                            {/* Export Media Format */}
+                            <div>
+                                <label className="flex items-center gap-2 text-sm font-medium text-gray-300 mb-2">
+                                    <Download className="w-4 h-4" />
+                                    Export Media Format
+                                    <button
+                                        onClick={() => { }}
+                                        className="p-1 rounded-full hover:bg-gray-600 text-gray-400 transition-colors cursor-help"
+                                        title="The modern protobuf format requires additional package metadata that is not yet fully supported. Use legacy JSON for compatibility with all Anki versions."
+                                    >
+                                        <Info className="w-3.5 h-3.5" />
+                                    </button>
+                                </label>
+                                <select
+                                    value={ankiSettings.exportMediaFormat || 'legacy'}
+                                    onChange={(e) => updateAnkiSettings({ exportMediaFormat: e.target.value as 'legacy' | 'modern' })}
+                                    className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                >
+                                    <option value="legacy">Legacy JSON (recommended)</option>
+                                    <option value="modern">Modern Protobuf (experimental)</option>
+                                </select>
+                                <p className="mt-1 text-xs text-gray-400">
+                                    Legacy JSON format is recommended for maximum compatibility. Modern Protobuf format is experimental and may not work with all Anki versions.
                                 </p>
                             </div>
                         </>

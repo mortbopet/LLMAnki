@@ -93,25 +93,21 @@ export async function processMediaReferences(
     // Try exact match first
     let blob = media.get(filename);
     
-    // If not found, try fuzzy matching
+    // If not found, try with digit prefixes (some Anki exports add 0-9 prefixes)
     if (!blob) {
-      // Try adding common prefixes (some Anki exports add digit prefixes)
       for (let i = 0; i <= 9; i++) {
         blob = media.get(`${i}${filename}`);
         if (blob) break;
       }
     }
     
-    // Try finding by hash (the long hex string part)
+    // Try case-insensitive match as last resort
     if (!blob) {
-      const hashMatch = filename.match(/([a-f0-9]{32,})/i);
-      if (hashMatch) {
-        const hash = hashMatch[1];
-        for (const [key, value] of media.entries()) {
-          if (key.includes(hash)) {
-            blob = value;
-            break;
-          }
+      const filenameLower = filename.toLowerCase();
+      for (const [key, value] of media.entries()) {
+        if (key.toLowerCase() === filenameLower) {
+          blob = value;
+          break;
         }
       }
     }

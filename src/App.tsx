@@ -42,6 +42,7 @@ function App() {
     const isAnalyzing = useAppStore(state => state.isAnalyzing);
     const analysisError = useAppStore(state => state.analysisError);
     const llmConfig = useAppStore(state => state.llmConfig);
+    const ankiSettings = useAppStore(state => state.ankiSettings);
     const setLLMConfig = useAppStore(state => state.setLLMConfig);
     const setShowSettings = useAppStore(state => state.setShowSettings);
     const setCardAnalysis = useAppStore(state => state.setCardAnalysis);
@@ -59,6 +60,11 @@ function App() {
     const cancelDeckAnalysis = useAppStore(state => state.cancelDeckAnalysis);
     const isDeckAnalysisCancelled = useAppStore(state => state.isDeckAnalysisCancelled);
     const resetDeckAnalysisCancelled = useAppStore(state => state.resetDeckAnalysisCancelled);
+
+    const isExporting = useAppStore(state => state.isExporting);
+    const exportProgress = useAppStore(state => state.exportProgress);
+    const setIsExporting = useAppStore(state => state.setIsExporting);
+    const setExportProgress = useAppStore(state => state.setExportProgress);
 
     // Card editing
     const updateCardFields = useAppStore(state => state.updateCardFields);
@@ -395,7 +401,13 @@ function App() {
         if (!collection) return;
 
         try {
-            const blob = await exportCollection(collection, markedForDeletion);
+            setIsExporting(true);
+            setExportProgress({ stage: 'Preparing export', percent: 0 });
+            const blob = await exportCollection(collection, {
+                excludeCardIds: markedForDeletion,
+                mediaFormat: ankiSettings.exportMediaFormat ?? 'legacy',
+                onProgress: (progress) => setExportProgress(progress)
+            });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
@@ -405,57 +417,76 @@ function App() {
         } catch (error) {
             console.error('Export failed:', error);
             alert('Export failed. See console for details.');
+        } finally {
+            setIsExporting(false);
+            setExportProgress(null);
         }
-    }, [collection, markedForDeletion]);
+    }, [collection, markedForDeletion, ankiSettings.exportMediaFormat, setIsExporting, setExportProgress]);
 
     return (
         <div className={`h-screen flex flex-col ${isDarkMode ? 'bg-anki-dark text-white' : 'bg-gray-100 text-gray-900'}`}>
             {/* Header */}
             <header className={`flex-shrink-0 px-4 py-3 border-b ${isDarkMode ? 'bg-anki-darker border-gray-700' : 'bg-white border-gray-200 shadow-sm'}`}>
-                <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                        <div className="flex items-center gap-2">
-                            <Sparkles className="w-6 h-6 text-blue-400" />
-                            <h1 className="text-xl font-bold">LLMAnki</h1>
+                <div className="flex flex-col gap-2">
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                            <div className="flex items-center gap-2">
+                                <Sparkles className="w-6 h-6 text-blue-400" />
+                                <h1 className="text-xl font-bold">LLMAnki</h1>
+                            </div>
+                            <span className={`text-xs hidden sm:inline ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                                AI-Powered Anki Deck Improvement
+                            </span>
                         </div>
-                        <span className={`text-xs hidden sm:inline ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                            AI-Powered Anki Deck Improvement
-                        </span>
+
+                        <div className="flex items-center gap-2">
+                            <FileUpload />
+
+                            {collection && (
+                                <>
+                                    <button
+                                        onClick={handleExport}
+                                        disabled={isExporting}
+                                        className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${isDarkMode ? 'bg-gray-700 hover:bg-gray-600' : 'bg-gray-200 hover:bg-gray-300'} ${isExporting ? 'opacity-60 cursor-not-allowed' : ''}`}
+                                    >
+                                        {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                                        <span className="hidden sm:inline text-sm">{isExporting ? 'Exporting...' : 'Export'}</span>
+                                    </button>
+                                </>
+                            )}
+
+                            <button
+                                onClick={() => setShowSettings(true)}
+                                className={`p-2 rounded-lg transition-colors ${isDarkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-200'}`}
+                                title="Settings"
+                            >
+                                <Settings className="w-5 h-5" />
+                            </button>
+
+                            <a
+                                href="https://github.com/mortbopet/LLMAnki"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className={`p-2 rounded-lg transition-colors ${isDarkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-200'}`}
+                                title="About LLMAnki"
+                            >
+                                <Info className="w-5 h-5" />
+                            </a>
+                        </div>
                     </div>
-
-                    <div className="flex items-center gap-2">
-                        <FileUpload />
-
-                        {collection && (
-                            <>
-                                <button
-                                    onClick={handleExport}
-                                    className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${isDarkMode ? 'bg-gray-700 hover:bg-gray-600' : 'bg-gray-200 hover:bg-gray-300'}`}
-                                >
-                                    <Download className="w-4 h-4" />
-                                    <span className="hidden sm:inline text-sm">Export</span>
-                                </button>
-                            </>
-                        )}
-
-                        <button
-                            onClick={() => setShowSettings(true)}
-                            className={`p-2 rounded-lg transition-colors ${isDarkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-200'}`}
-                            title="Settings"
-                        >
-                            <Settings className="w-5 h-5" />
-                        </button>
-
-                        <a
-                            href="https://github.com/mortbopet/LLMAnki"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className={`p-2 rounded-lg transition-colors ${isDarkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-200'}`}
-                            title="About LLMAnki"
-                        >
-                            <Info className="w-5 h-5" />
-                        </a>
-                    </div>
+                    {isExporting && exportProgress && (
+                        <div className="flex items-center gap-3">
+                            <div className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                                {exportProgress.stage} ({exportProgress.percent}%)
+                            </div>
+                            <div className={`flex-1 h-2 rounded-full overflow-hidden ${isDarkMode ? 'bg-gray-700' : 'bg-gray-200'}`}>
+                                <div
+                                    className="h-full bg-blue-500 transition-all duration-150"
+                                    style={{ width: `${exportProgress.percent}%` }}
+                                />
+                            </div>
+                        </div>
+                    )}
                 </div>
             </header>
 

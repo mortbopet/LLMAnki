@@ -4,3 +4,6 @@ dist-ssr
 *.local
 .DS_Store
 *.log
+# Generated protobuf files (keep .proto, ignore generated js/ts)
+src/proto/*.js
+src/proto/*.d.ts

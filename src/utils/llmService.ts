@@ -1,4 +1,4 @@
-import type { LLMProvider, LLMConfig, LLMAnalysisResult, RenderedCard, DeckAnalysisResult, AnkiDeck, AnkiCard, AnkiCollection, SuggestedCard, KnowledgeCoverage } from '../types';
+import type { LLMProvider, LLMConfig, LLMAnalysisResult, RenderedCard, DeckAnalysisResult, AnkiDeck, AnkiCard, AnkiCollection, SuggestedCard, KnowledgeCoverage, AnkiSettings, DisplaySettings } from '../types';
 import { renderCard } from './cardRenderer';
 import { Ollama } from 'ollama/browser';
 
@@ -344,9 +344,20 @@ export function getDefaultConfig(): LLMConfig {
     maxDeckAnalysisCards: 100,
     concurrentDeckAnalysis: false,
     requestDelayMs: 2000, // 2 seconds default delay between requests
-    suggestedCardsLayout: 'carousel', // Default to carousel view
+  };
+}
+
+export function getDefaultAnkiSettings(): AnkiSettings {
+  return {
     inheritCardMetadata: false, // New cards start fresh by default
-    darkMode: true // Dark mode by default
+    exportMediaFormat: 'legacy', // Legacy JSON format for maximum compatibility
+  };
+}
+
+export function getDefaultDisplaySettings(): DisplaySettings {
+  return {
+    darkMode: true, // Dark mode by default
+    suggestedCardsLayout: 'carousel', // Default to carousel view
   };
 }
 

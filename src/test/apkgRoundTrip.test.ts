@@ -18,6 +18,7 @@ import type {
   AnkiModel, 
   AnkiDeck, 
   ReviewLogEntry,
+  MediaManifestFormat,
 } from '../types';
 
 // ============================================================================
@@ -518,8 +519,12 @@ function createComprehensiveCollection(): AnkiCollection {
 /**
  * Convert collection to a File object for parsing
  */
-async function collectionToFile(collection: AnkiCollection, filename: string = 'test.apkg'): Promise<File> {
-  const blob = await exportCollection(collection);
+async function collectionToFile(
+  collection: AnkiCollection, 
+  filename: string = 'test.apkg',
+  mediaFormat: MediaManifestFormat = 'legacy'
+): Promise<File> {
+  const blob = await exportCollection(collection, { mediaFormat });
   return new File([blob], filename, { type: 'application/octet-stream' });
 }
 
@@ -905,7 +910,7 @@ describe('APKG Round-Trip Tests', () => {
       
       // Export excluding the deleted card
       const excludeSet = new Set([cardToDelete]);
-      const blob = await exportCollection(parsed, excludeSet);
+      const blob = await exportCollection(parsed, { excludeCardIds: excludeSet });
       const file2 = new File([blob], 'modified.apkg');
       const reparsed = await parseApkgFile(file2);
       
@@ -1392,4 +1397,515 @@ describe('APKG Round-Trip Tests', () => {
       expect(finalNote!.tags).toContain('round-3');
     });
   });
+
+  // ============================================================================
+  // Format-Specific Round-Trip Tests (Legacy vs Modern)
+  // ============================================================================
+
+  describe.each([
+    { format: 'legacy' as MediaManifestFormat, description: 'Legacy format (JSON manifest, uncompressed)' },
+    { format: 'modern' as MediaManifestFormat, description: 'Modern format (Protobuf manifest, zstd compressed)' },
+  ])('$description', ({ format }) => {
+    
+    it(`should round-trip a collection using ${format} format`, async () => {
+      const original = createComprehensiveCollection();
+      
+      // Export with the specified format
+      const file = await collectionToFile(original, 'test.apkg', format);
+      
+      // Parse the exported file
+      const parsed = await parseApkgFile(file);
+      
+      // Verify all data is preserved
+      assertCollectionsEqual(original, parsed);
+    });
+    
+    it(`should preserve media files through ${format} format round-trip`, async () => {
+      const original = createComprehensiveCollection();
+      
+      // Verify the original has media
+      expect(original.media.size).toBeGreaterThan(0);
+      
+      const file = await collectionToFile(original, 'test.apkg', format);
+      const parsed = await parseApkgFile(file);
+      
+      // Verify all media files are preserved
+      expect(parsed.media.size).toBe(original.media.size);
+      for (const [filename, originalBlob] of original.media) {
+        expect(parsed.media.has(filename)).toBe(true);
+        const parsedBlob = parsed.media.get(filename)!;
+        
+        // Compare actual content using Response API (jsdom compatible)
+        const originalText = await new Response(originalBlob).text();
+        const parsedText = await new Response(parsedBlob).text();
+        expect(parsedText).toBe(originalText);
+      }
+    });
+    
+    it(`should preserve card scheduling through ${format} format round-trip`, async () => {
+      const original = createComprehensiveCollection();
+      
+      const file = await collectionToFile(original, 'test.apkg', format);
+      const parsed = await parseApkgFile(file);
+      
+      // Check that all card scheduling data is preserved
+      for (const [cardId, originalCard] of original.cards) {
+        const parsedCard = parsed.cards.get(cardId);
+        expect(parsedCard).toBeDefined();
+        expect(parsedCard!.queue).toBe(originalCard.queue);
+        expect(parsedCard!.due).toBe(originalCard.due);
+        expect(parsedCard!.interval).toBe(originalCard.interval);
+        expect(parsedCard!.factor).toBe(originalCard.factor);
+        expect(parsedCard!.reps).toBe(originalCard.reps);
+        expect(parsedCard!.lapses).toBe(originalCard.lapses);
+      }
+    });
+    
+    it(`should handle modifications and re-export using ${format} format`, async () => {
+      const original = createComprehensiveCollection();
+      
+      // First export/import
+      let file = await collectionToFile(original, 'test.apkg', format);
+      let parsed = await parseApkgFile(file);
+      
+      // Modify a note
+      const noteId = Array.from(parsed.notes.keys())[0];
+      const note = parsed.notes.get(noteId)!;
+      note.tags.push('modified-tag');
+      note.fields[0] = 'Modified front content';
+      
+      // Second export/import with same format
+      file = await collectionToFile(parsed, 'test.apkg', format);
+      parsed = await parseApkgFile(file);
+      
+      // Verify modification persisted
+      const finalNote = parsed.notes.get(noteId)!;
+      expect(finalNote.tags).toContain('modified-tag');
+      expect(finalNote.fields[0]).toBe('Modified front content');
+    });
+    
+    it(`should handle multiple round-trips using ${format} format`, async () => {
+      const original = createComprehensiveCollection();
+      
+      let file = await collectionToFile(original, 'test.apkg', format);
+      let parsed = await parseApkgFile(file);
+      
+      // Multiple round-trips
+      for (let i = 0; i < 3; i++) {
+        file = await collectionToFile(parsed, 'test.apkg', format);
+        parsed = await parseApkgFile(file);
+      }
+      
+      // Verify data integrity after multiple cycles
+      assertCollectionsEqual(original, parsed);
+    });
+  });
+
+  // ============================================================================
+  // Cross-Format Tests (Export in one format, verify structure)
+  // ============================================================================
+
+  describe('Format Interoperability', () => {
+    
+    it('should be able to switch from legacy to modern format on re-export', async () => {
+      const original = createComprehensiveCollection();
+      
+      // Export as legacy first
+      let file = await collectionToFile(original, 'test.apkg', 'legacy');
+      let parsed = await parseApkgFile(file);
+      
+      // Re-export as modern
+      file = await collectionToFile(parsed, 'test.apkg', 'modern');
+      parsed = await parseApkgFile(file);
+      
+      // Verify data integrity
+      assertCollectionsEqual(original, parsed);
+    });
+    
+    it('should be able to switch from modern to legacy format on re-export', async () => {
+      const original = createComprehensiveCollection();
+      
+      // Export as modern first
+      let file = await collectionToFile(original, 'test.apkg', 'modern');
+      let parsed = await parseApkgFile(file);
+      
+      // Re-export as legacy
+      file = await collectionToFile(parsed, 'test.apkg', 'legacy');
+      parsed = await parseApkgFile(file);
+      
+      // Verify data integrity
+      assertCollectionsEqual(original, parsed);
+    });
+    
+    it('should preserve all data through legacy->modern->legacy cycle', async () => {
+      const original = createComprehensiveCollection();
+      
+      // Legacy -> Modern -> Legacy
+      let file = await collectionToFile(original, 'test.apkg', 'legacy');
+      let parsed = await parseApkgFile(file);
+      
+      file = await collectionToFile(parsed, 'test.apkg', 'modern');
+      parsed = await parseApkgFile(file);
+      
+      file = await collectionToFile(parsed, 'test.apkg', 'legacy');
+      parsed = await parseApkgFile(file);
+      
+      assertCollectionsEqual(original, parsed);
+    });
+    
+    it('should preserve all data through modern->legacy->modern cycle', async () => {
+      const original = createComprehensiveCollection();
+      
+      // Modern -> Legacy -> Modern
+      let file = await collectionToFile(original, 'test.apkg', 'modern');
+      let parsed = await parseApkgFile(file);
+      
+      file = await collectionToFile(parsed, 'test.apkg', 'legacy');
+      parsed = await parseApkgFile(file);
+      
+      file = await collectionToFile(parsed, 'test.apkg', 'modern');
+      parsed = await parseApkgFile(file);
+      
+      assertCollectionsEqual(original, parsed);
+    });
+  });
+  
+  describe('Export format verification', () => {
+    it('should produce valid VERSION_LATEST format with new schema', async () => {
+      const collection = createComprehensiveCollection();
+      
+      // Call exportCollection directly
+      const blob = await exportCollection(collection, { mediaFormat: 'modern' });
+      console.log('Export blob type:', blob.type);
+      console.log('Export blob size:', blob.size);
+      
+      // Parse the zip
+      const JSZip = (await import('jszip')).default;
+      const zip = await JSZip.loadAsync(blob);
+      
+      // List all files in the zip
+      const files = Object.keys(zip.files);
+      console.log('Files in zip:', files);
+      
+      // VERSION_LATEST format includes:
+      // - meta file with VERSION_LATEST (08 03)
+      // - collection.anki21b (zstd compressed database)
+      // - collection.anki2 (uncompressed for compatibility)
+      // - media (zstd compressed protobuf manifest)
+      // - numbered media files (zstd compressed)
+      expect(files).toContain('collection.anki21b');
+      expect(files).toContain('collection.anki2');
+      expect(files).toContain('meta');
+      expect(files).toContain('media');
+      
+      // Check meta file has VERSION_LATEST (08 03)
+      const metaData = await zip.file('meta')?.async('uint8array');
+      expect(metaData).toBeDefined();
+      expect(metaData![0]).toBe(0x08); // protobuf field 1 varint
+      expect(metaData![1]).toBe(0x03); // VERSION_LATEST
+      
+      // collection.anki21b should be zstd compressed (magic: 28 B5 2F FD)
+      const dbCompressed = await zip.file('collection.anki21b')?.async('uint8array');
+      expect(dbCompressed).toBeDefined();
+      expect(dbCompressed![0]).toBe(0x28);
+      expect(dbCompressed![1]).toBe(0xB5);
+      expect(dbCompressed![2]).toBe(0x2F);
+      expect(dbCompressed![3]).toBe(0xFD);
+      
+      // collection.anki2 should be valid SQLite (not compressed)
+      const dbData = await zip.file('collection.anki2')?.async('uint8array');
+      expect(dbData).toBeDefined();
+      const sqliteHeader = new TextDecoder('ascii').decode(dbData!.slice(0, 15));
+      expect(sqliteHeader).toBe('SQLite format 3');
+      
+      // Media manifest should be zstd compressed
+      const mediaManifest = await zip.file('media')?.async('uint8array');
+      expect(mediaManifest).toBeDefined();
+      expect(mediaManifest![0]).toBe(0x28); // zstd magic
+      expect(mediaManifest![1]).toBe(0xB5);
+    });
+    
+    it('should produce zstd compressed media files', async () => {
+      const collection = createComprehensiveCollection();
+      const blob = await exportCollection(collection, { mediaFormat: 'modern' });
+      
+      const JSZip = (await import('jszip')).default;
+      const zip = await JSZip.loadAsync(blob);
+      
+      // Get media file 0 - should be zstd compressed
+      const mediaData = await zip.file('0')?.async('uint8array');
+      expect(mediaData).toBeDefined();
+      
+      // Media files ARE zstd compressed in VERSION_LATEST format
+      expect(mediaData![0]).toBe(0x28); // zstd magic
+      expect(mediaData![1]).toBe(0xB5);
+      expect(mediaData![2]).toBe(0x2F);
+      expect(mediaData![3]).toBe(0xFD);
+      
+      // Decompress and verify content
+      const { decompress } = await import('fzstd');
+      const decompressed = decompress(mediaData!);
+      const textContent = new TextDecoder().decode(decompressed);
+      expect(textContent).toBe('PNG image data');
+    });
+  });
+  
+  describe('Reference deck roundtrip', () => {
+    it('should import and re-export Anki reference deck with matching format', async () => {
+      // Read the reference deck exported from Anki
+      const fs = await import('fs');
+      const path = await import('path');
+      const referencePath = path.join(__dirname, 'test_deck.apkg');
+      const referenceData = fs.readFileSync(referencePath);
+      const referenceFile = new File([referenceData], 'test_deck.apkg');
+      
+      // Parse reference deck
+      const JSZip = (await import('jszip')).default;
+      const refZip = await JSZip.loadAsync(referenceData);
+      console.log('Reference deck files:', Object.keys(refZip.files));
+      
+      // Log reference format details
+      const refMeta = await refZip.file('meta')?.async('uint8array');
+      console.log('Reference meta:', refMeta ? Array.from(refMeta).map(b => b.toString(16).padStart(2, '0')).join(' ') : 'none');
+      
+      // Import the deck
+      const collection = await parseApkgFile(referenceFile);
+      console.log('Imported', collection.cards.size, 'cards,', collection.notes.size, 'notes,', collection.media.size, 'media files');
+      
+      // Export using modern format (VERSION_LATEST)
+      const exportedBlob = await exportCollection(collection, { mediaFormat: 'modern' });
+      const exportedZip = await JSZip.loadAsync(exportedBlob);
+      console.log('Exported files:', Object.keys(exportedZip.files));
+      
+      // Log exported format details
+      const expMeta = await exportedZip.file('meta')?.async('uint8array');
+      console.log('Exported meta:', expMeta ? Array.from(expMeta).map(b => b.toString(16).padStart(2, '0')).join(' ') : 'none');
+      
+      // Save to file for manual testing with Anki
+      const exportedArray = await exportedZip.generateAsync({ type: 'uint8array' });
+      fs.writeFileSync(path.join(__dirname, 'exported_test.apkg'), Buffer.from(exportedArray));
+      console.log('Saved exported_test.apkg for manual testing');
+      
+      // Verify our export has VERSION_LATEST format matching the reference
+      expect(Object.keys(exportedZip.files)).toContain('meta');
+      expect(Object.keys(exportedZip.files)).toContain('collection.anki21b');
+      expect(Object.keys(exportedZip.files)).toContain('collection.anki2');
+      expect(Object.keys(exportedZip.files)).toContain('media');
+      
+      // Verify meta file is VERSION_LATEST (08 03) - same as reference
+      expect(Array.from(expMeta!)).toEqual(Array.from(refMeta!));
+      
+      // Verify collection.anki21b is zstd compressed
+      const expDb = await exportedZip.file('collection.anki21b')?.async('uint8array');
+      expect(expDb![0]).toBe(0x28);
+      expect(expDb![1]).toBe(0xB5);
+      expect(expDb![2]).toBe(0x2F);
+      expect(expDb![3]).toBe(0xFD);
+      
+      // Verify media manifest is zstd compressed
+      const expMedia = await exportedZip.file('media')?.async('uint8array');
+      expect(expMedia![0]).toBe(0x28);
+      expect(expMedia![1]).toBe(0xB5);
+      
+      // Verify database is valid SQLite (uncompressed version)
+      const expDbRaw = await exportedZip.file('collection.anki2')?.async('uint8array');
+      expect(expDbRaw).toBeDefined();
+      const sqliteHeader = new TextDecoder('ascii').decode(expDbRaw!.slice(0, 15));
+      expect(sqliteHeader).toBe('SQLite format 3');
+      
+      // Verify we can re-import our export
+      const exportedFile = new File([exportedBlob], 'exported.apkg');
+      const reimported = await parseApkgFile(exportedFile);
+      
+      // Card count should match
+      expect(reimported.cards.size).toBe(collection.cards.size);
+      expect(reimported.notes.size).toBe(collection.notes.size);
+      expect(reimported.media.size).toBe(collection.media.size);
+    });
+    
+    it('STRICT: should produce byte-identical output when roundtripping test_deck.apkg', async () => {
+      // This test verifies that importing and re-exporting test_deck.apkg produces
+      // an identical file. This is the strictest possible roundtrip test.
+      const fs = await import('fs');
+      const path = await import('path');
+      const JSZip = (await import('jszip')).default;
+      const { decompress } = await import('fzstd');
+      
+      // 1. Load reference deck
+      const referencePath = path.join(__dirname, 'test_deck.apkg');
+      const referenceData = fs.readFileSync(referencePath);
+      const referenceFile = new File([referenceData], 'test_deck.apkg');
+      
+      // Debug: First check what's actually in the reference file
+      const refZipCheck = await JSZip.loadAsync(referenceData);
+      console.log('Reference zip files:', Object.keys(refZipCheck.files));
+      
+      // 2. Parse reference deck into memory
+      const collection = await parseApkgFile(referenceFile);
+      
+      // Debug: Log what was parsed
+      console.log('Parsed collection:');
+      console.log('  - Notes:', collection.notes.size);
+      console.log('  - Cards:', collection.cards.size);
+      console.log('  - Models:', collection.models.size);
+      console.log('  - Schema format:', collection.schemaFormat);
+      
+      // Debug: Log first note to verify it matches reference
+      const firstNote = Array.from(collection.notes.values())[0];
+      if (firstNote) {
+        console.log('  - First note ID:', firstNote.id);
+        console.log('  - First note model:', firstNote.modelId);
+        console.log('  - First note fields:', firstNote.fields.slice(0, 2).map(f => f.substring(0, 50)));
+      }
+      
+      // 3. Export it back (strict passthrough for byte-identical comparison)
+      const exportedBlob = await exportCollection(collection, { preserveOriginal: true });
+      
+      // Convert blob to Uint8Array using JSZip's approach
+      const expZip = await JSZip.loadAsync(exportedBlob);
+      const exportedData = await expZip.generateAsync({ type: 'uint8array' });
+      
+      // Save for debugging
+      fs.writeFileSync(path.join(__dirname, 'strict_roundtrip_output.apkg'), Buffer.from(exportedData));
+      
+      // 4. Compare zip contents file by file
+      const refZip = await JSZip.loadAsync(referenceData);
+      
+      const refFiles = Object.keys(refZip.files).sort();
+      const expFiles = Object.keys(expZip.files).sort();
+      
+      console.log('Reference files:', refFiles);
+      console.log('Exported files:', expFiles);
+      
+      // First check: same files exist
+      expect(expFiles).toEqual(refFiles);
+      
+      // Compare each file
+      for (const filename of refFiles) {
+        const refContent = await refZip.file(filename)?.async('uint8array');
+        const expContent = await expZip.file(filename)?.async('uint8array');
+        
+        if (!refContent || !expContent) {
+          console.error(`Missing file: ${filename}`);
+          expect(expContent).toBeDefined();
+          continue;
+        }
+        
+        // For compressed files, decompress before comparing
+        let refDecompressed = refContent;
+        let expDecompressed = expContent;
+        
+        // Check if zstd compressed (magic: 28 B5 2F FD)
+        const isZstd = refContent[0] === 0x28 && refContent[1] === 0xB5 && 
+                       refContent[2] === 0x2F && refContent[3] === 0xFD;
+        
+        if (isZstd && filename !== 'meta') {
+          try {
+            refDecompressed = decompress(refContent);
+            expDecompressed = decompress(expContent);
+          } catch (e) {
+            console.error(`Failed to decompress ${filename}:`, e);
+          }
+        }
+        
+        // Compare sizes first
+        if (refDecompressed.length !== expDecompressed.length) {
+          console.error(`Size mismatch for ${filename}: ref=${refDecompressed.length}, exp=${expDecompressed.length}`);
+          
+          // For SQLite databases, let's compare table-by-table
+          if (filename === 'collection.anki21b' || filename === 'collection.anki2') {
+            await compareSqliteDatabases(refDecompressed, expDecompressed, filename);
+          } else if (filename === 'media') {
+            // Compare media manifests
+            console.log('Reference media manifest (first 200 bytes):', 
+              new TextDecoder().decode(refDecompressed.slice(0, 200)));
+            console.log('Exported media manifest (first 200 bytes):', 
+              new TextDecoder().decode(expDecompressed.slice(0, 200)));
+          }
+        }
+        
+        // Compare byte-by-byte
+        let firstDiffAt = -1;
+        for (let i = 0; i < Math.min(refDecompressed.length, expDecompressed.length); i++) {
+          if (refDecompressed[i] !== expDecompressed[i]) {
+            firstDiffAt = i;
+            break;
+          }
+        }
+        
+        if (firstDiffAt !== -1 || refDecompressed.length !== expDecompressed.length) {
+          console.error(`Content mismatch for ${filename} at byte ${firstDiffAt}`);
+          if (firstDiffAt !== -1) {
+            const start = Math.max(0, firstDiffAt - 10);
+            const end = Math.min(refDecompressed.length, firstDiffAt + 20);
+            console.error(`  Reference bytes [${start}-${end}]:`, 
+              Array.from(refDecompressed.slice(start, end)).map(b => b.toString(16).padStart(2, '0')).join(' '));
+            console.error(`  Exported bytes [${start}-${end}]:`, 
+              Array.from(expDecompressed.slice(start, end)).map(b => b.toString(16).padStart(2, '0')).join(' '));
+          }
+        }
+        
+        // The actual assertion
+        expect(Array.from(expDecompressed)).toEqual(Array.from(refDecompressed));
+      }
+    });
+  });
 });
+
+/**
+ * Helper to compare SQLite databases and report differences
+ */
+async function compareSqliteDatabases(refData: Uint8Array, expData: Uint8Array, filename: string): Promise<void> {
+  const initSqlJs = (await import('sql.js')).default;
+  const SQL = await initSqlJs();
+  
+  let refDb, expDb;
+  try {
+    refDb = new SQL.Database(refData);
+    expDb = new SQL.Database(expData);
+    
+    // Get all tables
+    const refTables = refDb.exec("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name");
+    const expTables = expDb.exec("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name");
+    
+    const refTableNames = refTables[0]?.values.map(v => v[0] as string) || [];
+    const expTableNames = expTables[0]?.values.map(v => v[0] as string) || [];
+    
+    console.log(`  ${filename} reference tables:`, refTableNames);
+    console.log(`  ${filename} exported tables:`, expTableNames);
+    
+    // Compare each table
+    for (const tableName of refTableNames) {
+      if (!expTableNames.includes(tableName)) {
+        console.error(`  Table ${tableName} missing in export`);
+        continue;
+      }
+      
+      const refRows = refDb.exec(`SELECT * FROM "${tableName}"`);
+      const expRows = expDb.exec(`SELECT * FROM "${tableName}"`);
+      
+      const refCount = refRows[0]?.values.length || 0;
+      const expCount = expRows[0]?.values.length || 0;
+      
+      if (refCount !== expCount) {
+        console.error(`  Table ${tableName} row count: ref=${refCount}, exp=${expCount}`);
+      }
+      
+      // For small tables, show the actual data
+      if (refCount <= 10 && (refCount !== expCount || JSON.stringify(refRows) !== JSON.stringify(expRows))) {
+        console.log(`  ${tableName} reference data:`, JSON.stringify(refRows[0]?.values, null, 2));
+        console.log(`  ${tableName} exported data:`, JSON.stringify(expRows[0]?.values, null, 2));
+      }
+    }
+    
+    // Check for extra tables in export
+    for (const tableName of expTableNames) {
+      if (!refTableNames.includes(tableName)) {
+        console.error(`  Extra table in export: ${tableName}`);
+      }
+    }
+  } finally {
+    refDb?.close();
+    expDb?.close();
+  }
+}

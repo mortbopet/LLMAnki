@@ -6,7 +6,7 @@ import { useAppStore } from '../store/useAppStore';
  * This should be called once at the app level.
  */
 export function useTheme() {
-    const darkMode = useAppStore(state => state.llmConfig.darkMode ?? true);
+    const darkMode = useAppStore(state => state.displaySettings.darkMode ?? true);
 
     useEffect(() => {
         if (darkMode) {

@@ -28,11 +28,13 @@ import type {
   AnkiNote,
   AnkiDeck,
   ReviewLogEntry,
+  AnkiSettings,
+  DisplaySettings,
 } from '../types';
 
 // Enable immer support for Map and Set
 enableMapSet();
-import { getDefaultConfig } from '../utils/llmService';
+import { getDefaultConfig, getDefaultAnkiSettings, getDefaultDisplaySettings } from '../utils/llmService';
 import type { 
   ICard, 
   CardStateData, 
@@ -91,6 +93,8 @@ interface AppState {
   fileName: string | null;
   isLoadingCollection: boolean;
   loadingProgress: string | null;
+  isExporting: boolean;
+  exportProgress: { stage: string; percent: number } | null;
   
   // === Card State (Single Source of Truth) ===
   /** All card state data, keyed by cardId */
@@ -125,6 +129,8 @@ interface AppState {
   
   // === Settings ===
   llmConfig: LLMConfig;
+  ankiSettings: AnkiSettings;
+  displaySettings: DisplaySettings;
   showSettings: boolean;
 }
 
@@ -137,6 +143,8 @@ interface AppActions {
   setCollection: (collection: AnkiCollection | null, fileName: string | null) => void;
   setIsLoadingCollection: (loading: boolean) => void;
   setLoadingProgress: (progress: string | null) => void;
+  setIsExporting: (exporting: boolean) => void;
+  setExportProgress: (progress: { stage: string; percent: number } | null) => void;
   initializeCards: (cards: CardStateData[]) => void;
   /** Create an empty collection (for creating decks from scratch) */
   createEmptyCollection: () => void;
@@ -204,6 +212,8 @@ interface AppActions {
   
   // === Settings ===
   setLLMConfig: (config: Partial<LLMConfig>) => void;
+  setAnkiSettings: (settings: Partial<AnkiSettings>) => void;
+  setDisplaySettings: (settings: Partial<DisplaySettings>) => void;
   setShowSettings: (show: boolean) => void;
   
   // === Analysis State ===
@@ -347,6 +357,8 @@ export const useAppStore = create<AppStore>()(
         fileName: null,
         isLoadingCollection: false,
         loadingProgress: null,
+        isExporting: false,
+        exportProgress: null,
         cards: new Map(),
         addedSuggestedCards: new Map(),
         persistedCardState: new Map(),
@@ -363,6 +375,8 @@ export const useAppStore = create<AppStore>()(
         suggestedCards: [],
         editingSuggestionIndex: null,
         llmConfig: getDefaultConfig(),
+        ankiSettings: getDefaultAnkiSettings(),
+        displaySettings: getDefaultDisplaySettings(),
         showSettings: false,
 
         // === Collection Actions ===
@@ -383,6 +397,8 @@ export const useAppStore = create<AppStore>()(
             state.fileName = fileName;
             state.isLoadingCollection = false;
             state.loadingProgress = null;
+            state.isExporting = false;
+            state.exportProgress = null;
             state.selectedDeckId = null;
             state.selectedCardId = null;
             state.isAnalyzing = false;
@@ -581,6 +597,18 @@ export const useAppStore = create<AppStore>()(
           });
         },
 
+        setIsExporting: (exporting) => {
+          set(state => {
+            state.isExporting = exporting;
+          });
+        },
+
+        setExportProgress: (progress) => {
+          set(state => {
+            state.exportProgress = progress;
+          });
+        },
+
         initializeCards: (cardDataList) => {
           set(state => {
             const newCards = new Map<number, CardStateData>();
@@ -598,6 +626,8 @@ export const useAppStore = create<AppStore>()(
             state.fileName = 'New Collection';
             state.isLoadingCollection = false;
             state.loadingProgress = null;
+            state.isExporting = false;
+            state.exportProgress = null;
             state.selectedDeckId = null;
             state.selectedCardId = null;
             state.isAnalyzing = false;
@@ -982,7 +1012,7 @@ export const useAppStore = create<AppStore>()(
           
           // Get source card for potential metadata inheritance
           const sourceCard = sourceCardId ? get().getCard(sourceCardId) : undefined;
-          const inheritMetadata = state.llmConfig.inheritCardMetadata;
+          const inheritMetadata = state.ankiSettings.inheritCardMetadata;
           
           // Create the new card
           const { cardStateData, ankiCard, ankiNote } = await createGeneratedCard(
@@ -1030,7 +1060,7 @@ export const useAppStore = create<AppStore>()(
           if (!deck) return null;
           
           const sourceCard = options.sourceCardId ? get().getCard(options.sourceCardId) : undefined;
-          const inheritMetadata = state.llmConfig.inheritCardMetadata;
+          const inheritMetadata = state.ankiSettings.inheritCardMetadata;
           
           // Use the Deck class to create the card
           const { cardStateData } = await deck.createCard(front, back, {
@@ -1230,6 +1260,18 @@ export const useAppStore = create<AppStore>()(
           });
         },
 
+        setAnkiSettings: (settings) => {
+          set(state => {
+            state.ankiSettings = { ...state.ankiSettings, ...settings };
+          });
+        },
+
+        setDisplaySettings: (settings) => {
+          set(state => {
+            state.displaySettings = { ...state.displaySettings, ...settings };
+          });
+        },
+
         setShowSettings: (show) => {
           set(state => {
             state.showSettings = show;
@@ -1249,10 +1291,14 @@ export const useAppStore = create<AppStore>()(
         name: 'llmanki-storage',
         partialize: (state) => ({
           llmConfig: state.llmConfig,
+          ankiSettings: state.ankiSettings,
+          displaySettings: state.displaySettings,
         }),
         merge: (persistedState, currentState) => {
           const persisted = persistedState as Partial<AppState>;
           const persistedConfig = (persisted.llmConfig || {}) as Partial<LLMConfig>;
+          const persistedAnkiSettings = (persisted.ankiSettings || {}) as Partial<AnkiSettings>;
+          const persistedDisplaySettings = (persisted.displaySettings || {}) as Partial<DisplaySettings>;
           return {
             ...currentState,
             llmConfig: {
@@ -1262,6 +1308,14 @@ export const useAppStore = create<AppStore>()(
                 ...currentState.llmConfig.apiKeys,
                 ...(persistedConfig.apiKeys || {}),
               },
+            },
+            ankiSettings: {
+              ...currentState.ankiSettings,
+              ...persistedAnkiSettings,
+            },
+            displaySettings: {
+              ...currentState.displaySettings,
+              ...persistedDisplaySettings,
             },
           };
         },

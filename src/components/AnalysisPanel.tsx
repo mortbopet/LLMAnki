@@ -44,14 +44,14 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ result }) => {
     const restoreCard = useAppStore(state => state.restoreCard);
     const selectedCardId = useAppStore(state => state.selectedCardId);
     const selectedDeckId = useAppStore(state => state.selectedDeckId);
-    const llmConfig = useAppStore(state => state.llmConfig);
+    const displaySettings = useAppStore(state => state.displaySettings);
     const cards = useAppStore(state => state.cards);
 
     // Track carousel position to persist across edit/save cycles
     const [carouselIndex, setCarouselIndex] = useState(0);
 
     // Get layout preference (default to carousel for backwards compatibility)
-    const suggestedCardsLayout = llmConfig.suggestedCardsLayout || 'carousel';
+    const suggestedCardsLayout = displaySettings.suggestedCardsLayout || 'carousel';
 
     // Compute selectedCard and deletion state from cards Map
     const selectedCard = useMemo(() => {

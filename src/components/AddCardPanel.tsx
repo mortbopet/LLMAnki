@@ -31,6 +31,7 @@ export const AddCardPanel: React.FC<AddCardPanelProps> = ({ deckId, deckName, on
     const addCard = useAppStore(state => state.addCard);
     const deleteCard = useAppStore(state => state.deleteCard);
     const llmConfig = useAppStore(state => state.llmConfig);
+    const displaySettings = useAppStore(state => state.displaySettings);
     const setAddCardPanelState = useAppStore(state => state.setAddCardPanelState);
     const getAddCardPanelState = useAppStore(state => state.getAddCardPanelState);
 
@@ -184,7 +185,7 @@ export const AddCardPanel: React.FC<AddCardPanelProps> = ({ deckId, deckName, on
     }, [updateState]);
 
     // Get layout preference
-    const suggestedCardsLayout = llmConfig.suggestedCardsLayout || 'carousel';
+    const suggestedCardsLayout = displaySettings.suggestedCardsLayout || 'carousel';
     const canAddManualCard = manualFields.some(f => f.value.trim());
 
     return (

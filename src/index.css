@@ -264,14 +264,129 @@ html:not(.dark) svg line[stroke="#6B7280"] {
   @apply max-w-full h-auto;
 }
 
-/* tiptap-extension-resize-image wrapper containment */
-.rich-text-field .ProseMirror .image-resizer,
-.rich-text-field .ProseMirror [data-type="image"] {
-  @apply max-w-full inline-block;
+/* Resizable image wrapper - ensure block display for proper line breaks */
+.rich-text-field .ProseMirror [data-node-view-wrapper] {
+  @apply block my-2;
 }
 
-.rich-text-field .ProseMirror .image-resizer img {
-  @apply max-w-full h-auto block;
+/* tiptap-extension-resizable-image styles */
+.node-image {
+  position: relative;
+  display: inline-block;
+}
+
+.node-image.ProseMirror-selectednode {
+  z-index: 1;
+}
+
+.image-component {
+  position: relative;
+  user-select: auto;
+  display: inline-flex;
+}
+
+.image-component img {
+  margin-bottom: 0;
+}
+
+.image-component img[data-keep-ratio]:not([data-keep-ratio="false"]) {
+  object-fit: contain;
+}
+
+.image-component img[data-keep-ratio="false"] {
+  object-fit: fill;
+}
+
+/* Show resize handles when image is selected */
+.node-image.ProseMirror-selectednode .image-resizer {
+  display: block;
+}
+
+.node-image.ProseMirror-selectednode .image-component {
+  outline: 2px solid rgb(60, 132, 244);
+}
+
+/* Resize handle styling */
+.image-component .image-resizer {
+  --box-size: 14px;
+  --resizer-offset: calc(var(--box-size) / 2 + 1px);
+  z-index: 2;
+  display: none;
+  width: var(--box-size);
+  height: var(--box-size);
+  position: absolute;
+  background-color: rgb(60, 132, 244);
+  border: 2px solid #fff;
+  border-radius: 50%;
+}
+
+.image-component .image-resizer.image-resizer-n {
+  inset: calc(var(--resizer-offset) * -1) 0 auto;
+  margin: auto;
+  cursor: n-resize;
+}
+
+.image-component .image-resizer.image-resizer-ne {
+  top: calc(var(--resizer-offset) * -1);
+  right: calc(var(--resizer-offset) * -1);
+  cursor: ne-resize;
+}
+
+.image-component .image-resizer.image-resizer-e {
+  right: calc(var(--resizer-offset) * -1);
+  top: 0;
+  bottom: 0;
+  margin: auto;
+  cursor: e-resize;
+}
+
+.image-component .image-resizer.image-resizer-se {
+  bottom: calc(var(--resizer-offset) * -1);
+  right: calc(var(--resizer-offset) * -1);
+  cursor: nwse-resize;
+}
+
+.image-component .image-resizer.image-resizer-s {
+  inset: auto 0 calc(var(--resizer-offset) * -1);
+  margin: auto;
+  cursor: s-resize;
+}
+
+.image-component .image-resizer.image-resizer-sw {
+  bottom: calc(var(--resizer-offset) * -1);
+  left: calc(var(--resizer-offset) * -1);
+  cursor: sw-resize;
+}
+
+.image-component .image-resizer.image-resizer-w {
+  left: calc(var(--resizer-offset) * -1);
+  top: 0;
+  bottom: 0;
+  margin: auto;
+  cursor: w-resize;
+}
+
+.image-component .image-resizer.image-resizer-nw {
+  top: calc(var(--resizer-offset) * -1);
+  left: calc(var(--resizer-offset) * -1);
+  cursor: nw-resize;
+}
+
+/* TipTap list styling - ensure bullets and numbers are visible */
+.rich-text-field .ProseMirror ul {
+  @apply list-disc pl-6 my-2;
+}
+
+.rich-text-field .ProseMirror ol {
+  @apply list-decimal pl-6 my-2;
+}
+
+.rich-text-field .ProseMirror li {
+  @apply my-1;
+}
+
+.rich-text-field .ProseMirror li p {
+  @apply my-0;
 }
 
 /* Tree view */

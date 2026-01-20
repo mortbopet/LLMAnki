@@ -96,6 +96,9 @@ export interface AnkiDeck {
   conf?: number;
 }
 
+/** Schema format used by the Anki database */
+export type AnkiSchemaFormat = 'legacy' | 'modern';
+
 export interface AnkiCollection {
   decks: Map<number, AnkiDeck>;
   models: Map<number, AnkiModel>;
@@ -104,6 +107,10 @@ export interface AnkiCollection {
   revlog: Map<number, ReviewLogEntry[]>; // Card ID -> review entries
   media: Map<string, Blob>;
   deckTree: AnkiDeck[];
+  /** Schema format: 'legacy' (col table with JSON) or 'modern' (notetypes/decks tables with protobuf) */
+  schemaFormat?: AnkiSchemaFormat;
+  /** Original APKG bytes for optional strict passthrough export */
+  sourceApkg?: Blob;
 }
 
 // Rendered card for display
@@ -143,6 +150,25 @@ export interface LLMProvider {
   requiresApiKey: boolean;
 }
 
+/** Format for exporting APKG media manifest */
+export type MediaManifestFormat = 'legacy' | 'modern';
+
+// Anki-specific settings (not LLM related)
+export interface AnkiSettings {
+  /** Whether new cards should inherit scheduling metadata from original card */
+  inheritCardMetadata: boolean;
+  /** Format for media manifest when exporting APKG */
+  exportMediaFormat: MediaManifestFormat;
+}
+
+// Display/UI settings
+export interface DisplaySettings {
+  /** Dark mode theme */
+  darkMode: boolean;
+  /** How to display suggested cards */
+  suggestedCardsLayout: 'carousel' | 'list';
+}
+
 export interface LLMConfig {
   providerId: string;
   model: string;
@@ -153,9 +179,6 @@ export interface LLMConfig {
   maxDeckAnalysisCards: number;
   concurrentDeckAnalysis: boolean;
   requestDelayMs: number; // Delay between requests during deck analysis (for rate limiting)
-  suggestedCardsLayout: 'carousel' | 'list'; // How to display suggested cards
-  inheritCardMetadata: boolean; // Whether new cards should inherit scheduling metadata from original card
-  darkMode: boolean; // Dark mode theme
 }
 
 export interface CardFeedback {

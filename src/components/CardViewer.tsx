@@ -422,17 +422,22 @@ export const CardViewer: React.FC<CardViewerProps> = ({
 
                     {/* Editable Fields */}
                     <div className="p-4 space-y-4">
-                        {processedLocalFields.map((field, index) => (
-                            <RichTextField
-                                key={field.name}
-                                label={field.name}
-                                value={field.value}
-                                onChange={(newValue) => handleFieldChange(index, newValue)}
-                                showClozeButton={cardType === 'cloze'}
-                                placeholder={`Enter ${field.name.toLowerCase()}...`}
-                                minHeight="80px"
-                            />
-                        ))}
+                        {processedLocalFields.map((field, index) => {
+                            // Use card ID in key to reset TipTap editor history when switching cards
+                            // For RenderedCards we have an id, for SuggestedCards use a stable identifier
+                            const cardIdentifier = 'id' in card ? card.id : 'suggested';
+                            return (
+                                <RichTextField
+                                    key={`${cardIdentifier}-${field.name}`}
+                                    label={field.name}
+                                    value={field.value}
+                                    onChange={(newValue) => handleFieldChange(index, newValue)}
+                                    showClozeButton={cardType === 'cloze'}
+                                    placeholder={`Enter ${field.name.toLowerCase()}...`}
+                                    minHeight="80px"
+                                />
+                            );
+                        })}
                     </div>
                 </>
             )}

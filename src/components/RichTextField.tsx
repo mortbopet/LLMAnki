@@ -1,7 +1,7 @@
-import React, { useCallback, useEffect, useState, useRef } from 'react';
+import React, { useCallback, useEffect, useState, useRef, useMemo } from 'react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
-import ImageResize from 'tiptap-extension-resize-image';
+import { ResizableImage } from 'tiptap-extension-resizable-image';
 import Placeholder from '@tiptap/extension-placeholder';
 import Underline from '@tiptap/extension-underline';
 import Link from '@tiptap/extension-link';
@@ -58,68 +58,60 @@ export const RichTextField: React.FC<RichTextFieldProps> = ({
     const lastEmittedValue = useRef(value);
     // Track if this is the initial mount
     const isInitialMount = useRef(true);
+    // Track if we're programmatically setting content (to ignore docChanged transactions)
+    const isSettingContent = useRef(false);
+
+    // Memoize extensions to prevent recreation on every render
+    const extensions = useMemo(() => [
+        StarterKit.configure({
+            heading: false, // Disable headings for Anki cards
+        }),
+        ResizableImage.configure({
+            allowBase64: true,
+            defaultWidth: 300,
+            minWidth: 50,
+            maxWidth: 800,
+            // Handle paste/drop of images
+            onUpload: async (file: File) => {
+                return new Promise((resolve) => {
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        resolve({ src: e.target?.result as string });
+                    };
+                    reader.readAsDataURL(file);
+                });
+            },
+        }),
+        Placeholder.configure({
+            placeholder,
+            emptyEditorClass: 'is-editor-empty',
+        }),
+        Underline,
+        Link.configure({
+            openOnClick: false, // Don't open links when editing
+            HTMLAttributes: {
+                class: 'text-blue-400 underline cursor-pointer',
+            },
+        }),
+        TextAlign.configure({
+            types: ['paragraph'],
+        }),
+        Subscript,
+        Superscript,
+        Highlight.configure({
+            multicolor: false,
+        }),
+        TextStyle,
+        Color,
+    ], [placeholder]);
 
     const editor = useEditor({
-        extensions: [
-            StarterKit.configure({
-                heading: false, // Disable headings for Anki cards
-            }),
-            ImageResize.configure({
-                inline: true,
-                allowBase64: true,
-            }),
-            Placeholder.configure({
-                placeholder,
-                emptyEditorClass: 'is-editor-empty',
-            }),
-            Underline,
-            Link.configure({
-                openOnClick: false, // Don't open links when editing
-                HTMLAttributes: {
-                    class: 'text-blue-400 underline cursor-pointer',
-                },
-            }),
-            TextAlign.configure({
-                types: ['paragraph'],
-            }),
-            Subscript,
-            Superscript,
-            Highlight.configure({
-                multicolor: false,
-            }),
-            TextStyle,
-            Color,
-        ],
+        extensions,
         content: value,
         editorProps: {
             attributes: {
                 class: 'prose prose-invert max-w-none focus:outline-none',
                 style: `min-height: ${minHeight}`,
-            },
-            handlePaste: (view, event) => {
-                const items = event.clipboardData?.items;
-                if (!items) return false;
-
-                for (const item of items) {
-                    if (item.type.startsWith('image/')) {
-                        event.preventDefault();
-                        const file = item.getAsFile();
-                        if (file) {
-                            const reader = new FileReader();
-                            reader.onload = (e) => {
-                                const dataUrl = e.target?.result as string;
-                                view.dispatch(
-                                    view.state.tr.replaceSelectionWith(
-                                        view.state.schema.nodes.image.create({ src: dataUrl })
-                                    )
-                                );
-                            };
-                            reader.readAsDataURL(file);
-                        }
-                        return true;
-                    }
-                }
-                return false;
             },
             // Mark that user is actively editing when they type/interact
             handleKeyDown: () => {
@@ -151,7 +143,10 @@ export const RichTextField: React.FC<RichTextFieldProps> = ({
         onTransaction: ({ transaction }) => {
             // Mark as edited when the document actually changes (not just selection)
             // This catches image resizing and other programmatic changes
-            if (transaction.docChanged) {
+            // BUT: ignore changes during:
+            // 1. Initial mount (editor parsing/normalizing content)
+            // 2. When we're programmatically setting content
+            if (transaction.docChanged && !isSettingContent.current && !isInitialMount.current) {
                 hasUserEdited.current = true;
             }
         },
@@ -168,7 +163,10 @@ export const RichTextField: React.FC<RichTextFieldProps> = ({
                 // Reset edit tracking when content is set externally (e.g., revert)
                 hasUserEdited.current = false;
                 lastEmittedValue.current = value;
+                // Mark that we're programmatically setting content to ignore docChanged transactions
+                isSettingContent.current = true;
                 editor.commands.setContent(value || '');
+                isSettingContent.current = false;
             }
         }
     }, [editor, value]);
@@ -199,7 +197,7 @@ export const RichTextField: React.FC<RichTextFieldProps> = ({
                 const reader = new FileReader();
                 reader.onload = (event) => {
                     const dataUrl = event.target?.result as string;
-                    editor.chain().focus().setImage({ src: dataUrl }).run();
+                    editor.chain().focus().setResizableImage({ src: dataUrl }).run();
                 };
                 reader.readAsDataURL(file);
             }

@@ -20,6 +20,7 @@ import {
   Deck,
   resetIdCounter,
 } from '../domain';
+import { processMediaReferences } from '../utils/cardRenderer';
 import type { CardStateData } from '../domain';
 import type { CardField, SuggestedCard, AnkiCollection, LLMAnalysisResult, ReviewLogEntry } from '../types';
 
@@ -636,6 +637,71 @@ describe('Store Actions', () => {
       expect(selectedCard).not.toBeNull();
       expect(selectedCard?.id).toBe(cardId);
     });
+
+    it('selecting a card does not mark it as edited', () => {
+      loadMockCollection([{ front: 'Question', back: 'Answer' }], 'Test.apkg');
+      const cards = Array.from(useAppStore.getState().cards.values());
+      const cardId = cards[0].cardId;
+
+      // Verify card is not edited before selection
+      let card = useAppStore.getState().getCard(cardId);
+      expect(card?.isEdited).toBe(false);
+
+      // Select the card
+      useAppStore.getState().selectCard(cardId);
+
+      // Card should still not be edited after selection
+      card = useAppStore.getState().getCard(cardId);
+      expect(card?.isEdited).toBe(false);
+    });
+
+    it('updating card fields with identical content does not mark as edited', async () => {
+      // This tests that if TipTap normalizes content and calls onChange with the same value,
+      // the card should NOT be marked as edited
+      const originalContent = 'Question';
+      loadMockCollection([{ front: originalContent, back: 'Answer' }], 'Test.apkg');
+      const cards = Array.from(useAppStore.getState().cards.values());
+      const cardId = cards[0].cardId;
+      
+      // Get the original fields
+      const card = useAppStore.getState().getCard(cardId);
+      const originalFields = card?.originalFields;
+      expect(originalFields).toBeDefined();
+
+      // Update with exact same content
+      await useAppStore.getState().updateCardFields(cardId, originalFields!);
+
+      // Should NOT be marked as edited
+      const updatedCard = useAppStore.getState().getCard(cardId);
+      expect(updatedCard?.isEdited).toBe(false);
+    });
+
+    it('updating card fields with HTML-wrapped version of same content marks as edited (expected store behavior)', async () => {
+      // This test documents expected store behavior: the store compares string values directly.
+      // When TipTap normalizes "Question" to "<p>Question</p>", if this reaches the store,
+      // it WILL mark the card as edited (strings differ).
+      // 
+      // The FIX for the "card marked edited on click" bug is in RichTextField.tsx:
+      // We prevent onChange from being called during initialization and programmatic content updates.
+      // This test verifies the store correctly detects string differences - the fix is at the UI level.
+      const originalContent = 'Question';
+      loadMockCollection([{ front: originalContent, back: 'Answer' }], 'Test.apkg');
+      const cards = Array.from(useAppStore.getState().cards.values());
+      const cardId = cards[0].cardId;
+      
+      // Simulate what TipTap does - it wraps plain text in <p> tags
+      const normalizedByTiptap = '<p>Question</p>';
+      
+      await useAppStore.getState().updateCardFields(cardId, [
+        { name: 'Front', value: normalizedByTiptap },
+        { name: 'Back', value: 'Answer' },
+      ]);
+
+      // This correctly marks as edited because the strings ARE different.
+      // The fix prevents RichTextField from emitting this change in the first place.
+      const updatedCard = useAppStore.getState().getCard(cardId);
+      expect(updatedCard?.isEdited).toBe(true);
+    });
   });
 
   describe('Card Field Updates', () => {
@@ -831,6 +897,73 @@ describe('Store Actions', () => {
       expect(card?.fields[0].value).toContain(`src="${dataUrl}"`);
       expect(card?.fields[0].value).not.toContain('missing-media');
     });
+
+    it('matches media files by exact filename, not partial hash match (regression test)', async () => {
+      // Bug: processMediaReferences was using key.includes(hash) which would match
+      // any filename containing the hash as a substring, causing wrong images to be displayed
+      // when the exact filename is not found but a similar one exists.
+      // 
+      // Scenario: Card references a file that exists in media, but the hash lookup
+      // incorrectly matches a different file with a similar hash pattern.
+      
+      // Create mock image blob
+      const wrongImageData = new Blob(['wrong-image-content'], { type: 'image/jpeg' });
+      
+      // The filenames have similar hash patterns - the longer one contains the shorter hash
+      const shortHash = '7fd55ceeef137b5301bbf12d218e81e01bafd207';
+      const shortFilename = `paste-${shortHash}.jpg`;
+      const longFilename = `paste-${shortHash}-f161b1ab6f4ef9cd3ef95c2259ed06c292ea78e3.jpg`;
+      
+      // Create media map - ONLY the longer filename exists
+      // This simulates the bug scenario where the card references a file
+      // and the hash lookup incorrectly matches a different file
+      const media = new Map<string, Blob>();
+      media.set(longFilename, wrongImageData);
+      
+      // HTML references the short filename (which does NOT exist in media)
+      const html = `<img src="${shortFilename}">`;
+      
+      // Process the media references
+      const result = await processMediaReferences(html, media);
+      
+      // Convert wrong blob to data URL to check it was NOT used
+      const wrongDataUrl = await new Promise<string>(resolve => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.readAsDataURL(wrongImageData);
+      });
+      
+      // The result should NOT contain the wrong image - it should show missing media
+      // because the exact file doesn't exist and we shouldn't match partial hashes
+      expect(result).not.toContain(wrongDataUrl);
+      expect(result).toContain('missing-media');
+    });
+
+    it('matches media files when hash lookup finds exact matching filename', async () => {
+      // Verify that hash lookup still works when it finds the EXACT file
+      const correctImageData = new Blob(['correct-image-content'], { type: 'image/jpeg' });
+      
+      const hash = '7fd55ceeef137b5301bbf12d218e81e01bafd207';
+      const filename = `paste-${hash}.jpg`;
+      
+      const media = new Map<string, Blob>();
+      media.set(filename, correctImageData);
+      
+      // HTML references the filename
+      const html = `<img src="${filename}">`;
+      
+      const result = await processMediaReferences(html, media);
+      
+      const correctDataUrl = await new Promise<string>(resolve => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.readAsDataURL(correctImageData);
+      });
+      
+      // Should find the exact file
+      expect(result).toContain(correctDataUrl);
+      expect(result).not.toContain('missing-media');
+    });
   });
 
   describe('Card Deletion', () => {
@@ -899,7 +1032,7 @@ describe('Store Actions', () => {
       ], 'Inherit Test.apkg');
       
       // Ensure inheritCardMetadata is FALSE
-      useAppStore.getState().setLLMConfig({ inheritCardMetadata: false });
+      useAppStore.getState().setAnkiSettings({ inheritCardMetadata: false });
       
       const deckId = getFirstDeckId();
       expect(deckId).not.toBeNull();
@@ -944,7 +1077,7 @@ describe('Store Actions', () => {
       ], 'Inherit Test.apkg');
       
       // Enable inheritCardMetadata
-      useAppStore.getState().setLLMConfig({ inheritCardMetadata: true });
+      useAppStore.getState().setAnkiSettings({ inheritCardMetadata: true });
       
       const deckId = getFirstDeckId();
       expect(deckId).not.toBeNull();
@@ -1113,7 +1246,7 @@ describe('Persistence Integration Tests', () => {
     ], fileName);
     
     // Enable inherit card metadata
-    useAppStore.getState().setLLMConfig({ inheritCardMetadata: true });
+    useAppStore.getState().setAnkiSettings({ inheritCardMetadata: true });
     
     const deckId = getFirstDeckId();
     expect(deckId).not.toBeNull();
