@@ -169,7 +169,7 @@ export const RichTextField: React.FC<RichTextFieldProps> = ({
             // Mark that we're programmatically setting content to ignore docChanged transactions
             isSettingContent.current = true;
             const rafId = requestAnimationFrame(() => {
-                editor.commands.setContent(value || '', false);
+                editor.commands.setContent(value || '', { emitUpdate: false });
                 isSettingContent.current = false;
             });
 
