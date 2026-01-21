@@ -15,6 +15,7 @@ import { useAppStore } from '../store/useAppStore';
 import { CardCarousel } from './CardCarousel';
 import { SuggestedCardsList } from './SuggestedCardsList';
 import type { LLMAnalysisResult, SuggestedCard } from '../types';
+import { getObjectiveKeyMap } from '../utils/llmService';
 
 interface AnalysisPanelProps {
     result: LLMAnalysisResult;
@@ -46,6 +47,7 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ result }) => {
     const selectedDeckId = useAppStore(state => state.selectedDeckId);
     const displaySettings = useAppStore(state => state.displaySettings);
     const cards = useAppStore(state => state.cards);
+    const analysisObjectives = useAppStore(state => state.llmConfig.analysisObjectives);
 
     // Track carousel position to persist across edit/save cycles
     const [carouselIndex, setCarouselIndex] = useState(0);
@@ -124,10 +126,13 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ result }) => {
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
-                    <CriteriaCheck label="Unambiguous" passed={feedback.isUnambiguous} />
-                    <CriteriaCheck label="Atomic" passed={feedback.isAtomic} />
-                    <CriteriaCheck label="Recognizable" passed={feedback.isRecognizable} />
-                    <CriteriaCheck label="Active Recall" passed={feedback.isActiveRecall} />
+                    {getObjectiveKeyMap(analysisObjectives).map(({ objective, key }) => (
+                        <CriteriaCheck
+                            key={key}
+                            label={objective.label}
+                            passed={feedback.objectives?.[key] ?? true}
+                        />
+                    ))}
                 </div>
             </div>
 

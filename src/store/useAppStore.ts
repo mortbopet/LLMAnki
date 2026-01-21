@@ -30,6 +30,7 @@ import type {
   ReviewLogEntry,
   AnkiSettings,
   DisplaySettings,
+  LLMLogEntry,
 } from '../types';
 
 // Enable immer support for Map and Set
@@ -126,6 +127,7 @@ interface AppState {
   addCardPanelState: Map<number, AddCardPanelState>;
   suggestedCards: SuggestedCard[];
   editingSuggestionIndex: number | null;
+  llmLogs: LLMLogEntry[];
   
   // === Settings ===
   llmConfig: LLMConfig;
@@ -215,6 +217,8 @@ interface AppActions {
   setAnkiSettings: (settings: Partial<AnkiSettings>) => void;
   setDisplaySettings: (settings: Partial<DisplaySettings>) => void;
   setShowSettings: (show: boolean) => void;
+  addLLMLog: (entry: LLMLogEntry) => void;
+  clearLLMLogs: () => void;
   
   // === Analysis State ===
   resetAnalysis: () => void;
@@ -374,6 +378,7 @@ export const useAppStore = create<AppStore>()(
         addCardPanelState: new Map(),
         suggestedCards: [],
         editingSuggestionIndex: null,
+        llmLogs: [],
         llmConfig: getDefaultConfig(),
         ankiSettings: getDefaultAnkiSettings(),
         displaySettings: getDefaultDisplaySettings(),
@@ -1278,6 +1283,18 @@ export const useAppStore = create<AppStore>()(
           });
         },
 
+        addLLMLog: (entry) => {
+          set(state => {
+            state.llmLogs = [...state.llmLogs, entry].slice(-500);
+          });
+        },
+
+        clearLLMLogs: () => {
+          set(state => {
+            state.llmLogs = [];
+          });
+        },
+
         resetAnalysis: () => {
           set(state => {
             state.isAnalyzing = false;
@@ -1312,6 +1329,7 @@ export const useAppStore = create<AppStore>()(
               ...currentState.llmConfig,
               ...persistedConfig,
               apiKeys: migratedApiKeys,
+              analysisObjectives: persistedConfig.analysisObjectives || currentState.llmConfig.analysisObjectives,
             },
             ankiSettings: {
               ...currentState.ankiSettings,

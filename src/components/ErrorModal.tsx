@@ -1,5 +1,6 @@
 import React from 'react';
 import { X, AlertCircle, Server, Clock, Key, Wifi, HelpCircle, ExternalLink } from 'lucide-react';
+import { JsonViewer } from '@textea/json-viewer';
 import { useAppStore } from '../store/useAppStore';
 import { LLM_PROVIDERS, type LLMErrorType } from '../utils/llmService';
 
@@ -38,6 +39,28 @@ function parseErrorType(error: string): LLMErrorType {
     return 'unknown';
 }
 
+function extractJsonPayload(error: string): unknown | null {
+    try {
+        return JSON.parse(error);
+    } catch {
+        // Continue with extraction attempts
+    }
+
+    const apiErrorIndex = error.toLowerCase().indexOf('api error');
+    const scanStart = apiErrorIndex >= 0 ? apiErrorIndex : 0;
+    const startIndex = error.indexOf('{', scanStart);
+    const endIndex = error.lastIndexOf('}');
+
+    if (startIndex < 0 || endIndex <= startIndex) return null;
+
+    const candidate = error.slice(startIndex, endIndex + 1);
+    try {
+        return JSON.parse(candidate);
+    } catch {
+        return null;
+    }
+}
+
 const errorIcons: Record<LLMErrorType, React.ReactNode> = {
     rate_limit: <Clock className="w-8 h-8 text-yellow-500" />,
     auth_error: <Key className="w-8 h-8 text-red-500" />,
@@ -74,6 +97,7 @@ export const ErrorModal: React.FC<ErrorModalProps> = ({ error, onClose }) => {
 
     const errorType = parseErrorType(error);
     const provider = LLM_PROVIDERS.find(p => p.id === llmConfig.providerId);
+    const parsedJson = errorType === 'rate_limit' ? extractJsonPayload(error) : null;
 
     const getSuggestion = (): { text: string; action?: () => void; actionLabel?: string } => {
         switch (errorType) {
@@ -164,7 +188,11 @@ export const ErrorModal: React.FC<ErrorModalProps> = ({ error, onClose }) => {
 
                     {/* Error message */}
                     <div className="bg-gray-900/50 rounded-lg p-4">
-                        <p className="text-sm text-gray-300 font-mono break-words">{error}</p>
+                        {parsedJson ? (
+                            <JsonViewer value={parsedJson} defaultInspectDepth={2} theme="dark" />
+                        ) : (
+                            <p className="text-sm text-gray-300 font-mono break-words">{error}</p>
+                        )}
                     </div>
 
                     {/* Suggestion */}

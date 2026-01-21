@@ -1,12 +1,38 @@
-import type { LLMProvider, LLMConfig, LLMAnalysisResult, RenderedCard, DeckAnalysisResult, AnkiDeck, AnkiCard, AnkiCollection, SuggestedCard, KnowledgeCoverage, AnkiSettings, DisplaySettings } from '../types';
+import type { LLMProvider, LLMConfig, LLMAnalysisResult, RenderedCard, DeckAnalysisResult, AnkiDeck, AnkiCard, AnkiCollection, SuggestedCard, KnowledgeCoverage, AnkiSettings, DisplaySettings, AnalysisObjective, LLMLogEntry } from '../types';
 import { renderCard } from './cardRenderer';
 import { Ollama } from 'ollama/browser';
+import DEFAULT_SYSTEM_PROMPT_RAW from '../prompts/default-system-prompt.md?raw';
+import DECK_COVERAGE_SYSTEM_PROMPT_RAW from '../prompts/deck-coverage-system-prompt.md?raw';
+import GENERATE_CARDS_SYSTEM_PROMPT_RAW from '../prompts/generate-cards-system-prompt.md?raw';
 
 export interface ProviderInfo {
   description: string;
   apiKeyUrl: string;
   apiKeyInstructions: string;
   pricing: string;
+}
+
+let llmLogger: ((entry: LLMLogEntry) => void) | null = null;
+
+export function setLLMLogger(logger: ((entry: LLMLogEntry) => void) | null): void {
+  llmLogger = logger;
+}
+
+function logLLM(entry: Omit<LLMLogEntry, 'id' | 'timestamp'>): void {
+  if (!llmLogger) return;
+  llmLogger({
+    ...entry,
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    timestamp: Date.now(),
+  });
+}
+
+function sanitizeHeaders(headers: Record<string, string>): Record<string, string> {
+  const sanitized = { ...headers };
+  if (sanitized.Authorization) {
+    sanitized.Authorization = 'Bearer ***';
+  }
+  return sanitized;
 }
 
 // Error types for better error handling
@@ -178,6 +204,46 @@ export const PROVIDER_INFO: Record<string, ProviderInfo> = {
 // This allows the app to detect when users have an outdated prompt from localStorage
 export const SYSTEM_PROMPT_VERSION = 3;
 
+export const DEFAULT_ANALYSIS_OBJECTIVES: AnalysisObjective[] = [
+  {
+    label: 'Unambiguous',
+    description: 'Only one reasonable answer exists. The question is precise and not confusing.'
+  },
+  {
+    label: 'Atomic',
+    description: 'Tests exactly one fact or concept. Complex info is split into smaller cards.'
+  },
+  {
+    label: 'Recognizable',
+    description: 'Uses context from the original source so the card feels familiar.'
+  },
+  {
+    label: 'Active Recall',
+    description: 'Requires genuine recall rather than recognition or guessing.'
+  }
+];
+
+export function deriveObjectiveKey(label: string): string {
+  const compact = label.replace(/\s+/g, '').replace(/[^a-zA-Z0-9_]/g, '');
+  if (!compact) return 'isObjective';
+  return `is${compact[0].toUpperCase()}${compact.slice(1)}`;
+}
+
+export function getObjectiveKeyMap(objectives: AnalysisObjective[]): Array<{ objective: AnalysisObjective; key: string }> {
+  const used = new Set<string>();
+  return objectives.map((objective, index) => {
+    const baseKey = deriveObjectiveKey(objective.label) || `isObjective${index + 1}`;
+    let key = baseKey;
+    let suffix = 2;
+    while (used.has(key)) {
+      key = `${baseKey}${suffix}`;
+      suffix += 1;
+    }
+    used.add(key);
+    return { objective, key };
+  });
+}
+
 export const LLM_PROVIDERS: LLMProvider[] = [
   {
     id: 'openai',
@@ -223,115 +289,7 @@ export const LLM_PROVIDERS: LLMProvider[] = [
   }
 ];
 
-export const DEFAULT_SYSTEM_PROMPT = `You are an expert Anki card reviewer and educator. Your task is to analyze flashcards and suggest improvements based on evidence-based learning principles.
-
-## Card Quality Criteria
-
-A good Anki card should be:
-
-1. **Unambiguous**: Only one reasonable answer exists. The question should be precise enough that there's no confusion about what's being asked.
-
-2. **Atomic**: Tests exactly one fact or concept. Complex information should be broken into multiple cards.
-
-3. **Recognizable**: Uses context from the original source material. Cards should connect to how the information was originally learned.
-
-4. **Active Recall**: Requires genuine recall, not just recognition. Avoid questions where the answer can be guessed from the question.
-
-## Card Types and Their Fields
-
-### Basic Cards
-- **Fields**: "Front" (question) and "Back" (answer)
-- Use for simple Q&A pairs, definitions, terminology
-
-### Basic (and reversed card)
-- **Fields**: "Front" and "Back"
-- Creates two cards: Front→Back and Back→Front
-- ONLY use this when the relationship is truly bidirectional (e.g., translations, symbol↔name pairs)
-- Do NOT use for definitions, explanations, or Q&A where the reverse doesn't make sense
-- When in doubt, prefer "basic" over "basic-reversed"
-
-### Cloze Cards
-- **Fields**: "Text" (contains cloze deletions) and "Extra" (optional additional context shown alongside the revealed answer)
-- Cloze syntax: {{c1::answer}} - the hidden text is revealed when the card is answered
-- With optional hint: {{c1::answer::hint}} - only add ::hint when a hint is helpful
-- CRITICAL: The cloze deletion should hide a SHORT key term or phrase (1-5 words), NOT an entire sentence or definition!
-  - GOOD: "The {{c1::mitochondria}} is the powerhouse of the cell"
-  - BAD: "The mitochondria is {{c1::the powerhouse of the cell}}" (hiding too much)
-  - BAD: "{{c1::The mitochondria is the powerhouse of the cell}}" (hiding everything defeats the purpose)
-- The surrounding text provides context, and the cloze tests recall of the KEY TERM
-- When a cloze is revealed, the hidden text is automatically shown in place of the cloze. Do NOT repeat the cloze answers in the Extra field.
-- Multiple cloze deletions can use same number (c1) to hide together, or different numbers (c1, c2) for separate cards
-- The "Extra" field is for additional context, mnemonics, or images - NOT for repeating the answers
-
-## Your Task
-
-Analyze the provided card and:
-1. Evaluate it against each criterion
-2. Provide specific, actionable feedback
-3. Suggest improved card(s) if needed - USE THE CORRECT FIELD NAMES FOR THE CARD TYPE
-4. Recommend deletion of the original if your suggestions replace it completely
-
-## Self-Evaluation of Suggested Cards
-
-BEFORE including a suggested card in your response, you MUST mentally evaluate it against the same criteria:
-- Is it unambiguous? Is it atomic? Does it enable active recall?
-- Would it score HIGHER than the original card?
-- If your suggested card would score lower than or equal to the original, REVISE it until it is genuinely better.
-- Only include suggested cards that represent a clear improvement over the original.
-- Do NOT suggest a card just for the sake of suggesting something - if the original is good, say so.
-
-## Response Format
-
-Respond with a JSON object in this exact format:
-{
-  "feedback": {
-    "isUnambiguous": boolean,
-    "isAtomic": boolean,
-    "isRecognizable": boolean,
-    "isActiveRecall": boolean,
-    "overallScore": number (1-10),
-    "issues": ["plain text strings describing problems - NOT card objects"],
-    "suggestions": ["plain text strings with improvement tips - NOT card objects"],
-    "reasoning": "detailed explanation of your analysis"
-  },
-  "suggestedCards": [
-    // Card objects go HERE, not in feedback.suggestions!
-    {
-      "type": "basic" | "cloze" | "basic-reversed",
-      "fields": [...],
-      "explanation": "string"
-    }
-  ],
-  "deleteOriginal": boolean,
-  "deleteReason": "explanation if deletion is recommended"
-}
-
-CRITICAL: 
-- "feedback.issues" and "feedback.suggestions" are arrays of PLAIN TEXT STRINGS, not card objects
-- Card objects with "type", "fields", "explanation" go ONLY in the top-level "suggestedCards" array
-- Do NOT put card objects inside feedback.suggestions - that causes parsing errors
-
-## STRICT FIELD REQUIREMENTS FOR suggestedCards:
-
-For type "basic" or "basic-reversed":
-  "fields": [
-    {"name": "Front", "value": "the question or prompt"},
-    {"name": "Back", "value": "the answer"}
-  ]
-
-For type "cloze":
-  "fields": [
-    {"name": "Text", "value": "text with {{c1::cloze deletion}} syntax"},
-    {"name": "Extra", "value": "optional context, mnemonics, or images - NOT for cloze answers (they show automatically)"}
-  ]
-
-IMPORTANT RULES:
-- The "type" field MUST be exactly one of: "basic", "cloze", or "basic-reversed"
-- Field names are case-sensitive: use "Front"/"Back" for basic, "Text"/"Extra" for cloze
-- Cloze format: {{c1::answer}} or {{c1::answer::hint}} - trailing :: only when adding a hint
-- When cloze cards are revealed, the answer replaces the cloze marker automatically. Do NOT put cloze answers in Extra.
-- Preserve any images by keeping <img> tags exactly as they appear in the original
-- Keep all media references intact`;
+export const DEFAULT_SYSTEM_PROMPT = DEFAULT_SYSTEM_PROMPT_RAW.trim();
 
 export function getDefaultConfig(): LLMConfig {
   return {
@@ -340,11 +298,66 @@ export function getDefaultConfig(): LLMConfig {
     apiKeys: {},
     systemPrompt: DEFAULT_SYSTEM_PROMPT,
     systemPromptVersion: SYSTEM_PROMPT_VERSION,
+    analysisObjectives: DEFAULT_ANALYSIS_OBJECTIVES.map(obj => ({ ...obj })),
     sendImages: true,
     maxDeckAnalysisCards: 100,
     concurrentDeckAnalysis: false,
     requestDelayMs: 2000, // 2 seconds default delay between requests
   };
+}
+
+function buildAnalysisSystemPrompt(config: LLMConfig): string {
+  const objectives = config.analysisObjectives?.length
+    ? config.analysisObjectives
+    : DEFAULT_ANALYSIS_OBJECTIVES;
+  const objectiveKeyMap = getObjectiveKeyMap(objectives);
+
+  const objectivesList = objectiveKeyMap
+    .map(({ objective, key }) => `- \`${key}\` (${objective.label}): ${objective.description}`)
+    .join('\n');
+
+  const feedbackShape = objectiveKeyMap
+    .map(({ key }) => `    "${key}": boolean,`)
+    .join('\n');
+
+  return [
+    config.systemPrompt?.trim(),
+    '',
+    'CRITICAL OUTPUT RULES:',
+    '- Return ONLY the JSON object. No extra text, no markdown, no code fences, no preamble, no epilogue.',
+    '- Do NOT include headings, explanations, or step-by-step reasoning outside the JSON.',
+    '- Any output outside the JSON object is invalid.',
+    '',
+    '## Analysis Objectives',
+    'Evaluate the card against each objective below. Use the objective key as the JSON field name in feedback:',
+    objectivesList,
+    '',
+    '## Response Format',
+    'Respond with a JSON object in this exact format:',
+    '{',
+    '  "feedback": {',
+    feedbackShape,
+    '    "overallScore": number (1-10),',
+    '    "issues": ["plain text strings describing problems - NOT card objects"],',
+    '    "suggestions": ["plain text strings with improvement tips - NOT card objects"],',
+    '    "reasoning": "detailed explanation of your analysis"',
+    '  },',
+    '  "suggestedCards": [',
+    '    {',
+    '      "type": "basic" | "cloze" | "basic-reversed",',
+    '      "fields": [...],',
+    '      "explanation": "string"',
+    '    }',
+    '  ],',
+    '  "deleteOriginal": boolean,',
+    '  "deleteReason": "explanation if deletion is recommended"',
+    '}',
+    '',
+    'CRITICAL:',
+    '- "feedback.issues" and "feedback.suggestions" are arrays of PLAIN TEXT STRINGS, not card objects',
+    '- Card objects with "type", "fields", "explanation" go ONLY in the top-level "suggestedCards" array',
+    '- Do NOT put card objects inside feedback.suggestions - that causes parsing errors',
+  ].filter(Boolean).join('\n');
 }
 
 export function getDefaultAnkiSettings(): AnkiSettings {
@@ -358,6 +371,7 @@ export function getDefaultDisplaySettings(): DisplaySettings {
   return {
     darkMode: true, // Dark mode by default
     suggestedCardsLayout: 'carousel', // Default to carousel view
+    developerMode: false,
   };
 }
 
@@ -706,26 +720,47 @@ export async function analyzeCard(
     
     if (config.providerId === 'anthropic') {
       // Anthropic has a different API format
-      response = await fetch(`${provider.baseUrl}/messages`, {
+      const endpoint = `${provider.baseUrl}/messages`;
+      const headers = {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      };
+      const body = {
+        model: config.model,
+        max_tokens: 4096,
+        system: buildAnalysisSystemPrompt(config),
+        messages: [
+          { role: 'user', content: userMessage }
+        ]
+      };
+      const startTime = Date.now();
+      logLLM({
+        direction: 'request',
+        providerId: config.providerId,
+        model: config.model,
+        endpoint,
+        payload: { headers: sanitizeHeaders(headers), body }
+      });
+
+      response = await fetch(endpoint, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': apiKey,
-          'anthropic-version': '2023-06-01',
-          'anthropic-dangerous-direct-browser-access': 'true'
-        },
-        body: JSON.stringify({
-          model: config.model,
-          max_tokens: 4096,
-          system: config.systemPrompt,
-          messages: [
-            { role: 'user', content: userMessage }
-          ]
-        })
+        headers,
+        body: JSON.stringify(body)
       });
       
       if (!response.ok) {
         const errorText = await response.text();
+        logLLM({
+          direction: 'error',
+          providerId: config.providerId,
+          model: config.model,
+          endpoint,
+          status: response.status,
+          durationMs: Date.now() - startTime,
+          payload: { error: errorText }
+        });
         const { type, retryAfter } = classifyError('anthropic', response.status, errorText);
         throw createLLMError(
           `Anthropic API error: ${errorText}`,
@@ -737,8 +772,17 @@ export async function analyzeCard(
       }
       
       const data = await response.json();
+      logLLM({
+        direction: 'response',
+        providerId: config.providerId,
+        model: config.model,
+        endpoint,
+        status: response.status,
+        durationMs: Date.now() - startTime,
+        payload: data
+      });
       const content = data.content[0].text;
-      const result = parseAnalysisResponse(content);
+      const result = parseAnalysisResponse(content, config.analysisObjectives);
       return injectImagesIntoSuggestedCards(result, card);
     } else {
       // OpenAI-compatible API (OpenAI, Groq, Together, OpenRouter)
@@ -757,23 +801,43 @@ export async function analyzeCard(
       }
       
       const messages = [
-        { role: 'system', content: config.systemPrompt },
+        { role: 'system', content: buildAnalysisSystemPrompt(config) },
         { role: 'user', content: userMessage }
       ];
-      
-      response = await fetch(`${provider.baseUrl}/chat/completions`, {
+
+      const endpoint = `${provider.baseUrl}/chat/completions`;
+      const body = {
+        model: config.model,
+        messages,
+        temperature: 0.7,
+        max_tokens: 4096
+      };
+      const startTime = Date.now();
+      logLLM({
+        direction: 'request',
+        providerId: config.providerId,
+        model: config.model,
+        endpoint,
+        payload: { headers: sanitizeHeaders(headers), body }
+      });
+
+      response = await fetch(endpoint, {
         method: 'POST',
         headers,
-        body: JSON.stringify({
-          model: config.model,
-          messages,
-          temperature: 0.7,
-          max_tokens: 4096
-        })
+        body: JSON.stringify(body)
       });
       
       if (!response.ok) {
         const errorText = await response.text();
+        logLLM({
+          direction: 'error',
+          providerId: config.providerId,
+          model: config.model,
+          endpoint,
+          status: response.status,
+          durationMs: Date.now() - startTime,
+          payload: { error: errorText }
+        });
         const { type, retryAfter } = classifyError(config.providerId, response.status, errorText);
         throw createLLMError(
           `API error: ${errorText}`,
@@ -785,8 +849,17 @@ export async function analyzeCard(
       }
       
       const data = await response.json();
+      logLLM({
+        direction: 'response',
+        providerId: config.providerId,
+        model: config.model,
+        endpoint,
+        status: response.status,
+        durationMs: Date.now() - startTime,
+        payload: data
+      });
       const content = data.choices[0].message.content;
-      const result = parseAnalysisResponse(content);
+      const result = parseAnalysisResponse(content, config.analysisObjectives);
       return injectImagesIntoSuggestedCards(result, card);
     }
   } catch (error) {
@@ -823,23 +896,47 @@ async function analyzeWithOllama(
 ): Promise<LLMAnalysisResult> {
   try {
     const ollama = new Ollama({ host: 'http://localhost:11434' });
-    
-    const response = await ollama.chat({
+    const payload = {
       model: config.model,
       messages: [
-        { role: 'system', content: config.systemPrompt },
+        { role: 'system', content: buildAnalysisSystemPrompt(config) },
         { role: 'user', content: userMessage }
       ],
       options: {
         temperature: 0.7
       }
+    };
+    const startTime = Date.now();
+    logLLM({
+      direction: 'request',
+      providerId: config.providerId,
+      model: config.model,
+      endpoint: 'ollama.chat',
+      payload
+    });
+
+    const response = await ollama.chat(payload);
+    logLLM({
+      direction: 'response',
+      providerId: config.providerId,
+      model: config.model,
+      endpoint: 'ollama.chat',
+      durationMs: Date.now() - startTime,
+      payload: response
     });
     
     const content = response.message.content;
-    const result = parseAnalysisResponse(content);
+    const result = parseAnalysisResponse(content, config.analysisObjectives);
     return injectImagesIntoSuggestedCards(result, card);
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
+    logLLM({
+      direction: 'error',
+      providerId: config.providerId,
+      model: config.model,
+      endpoint: 'ollama.chat',
+      payload: { error: errorMessage }
+    });
     
     // Detect specific Ollama errors
     if (errorMessage.includes('ECONNREFUSED') || errorMessage.includes('Failed to fetch')) {
@@ -862,7 +959,7 @@ async function analyzeWithOllama(
   }
 }
 
-function parseAnalysisResponse(content: string): LLMAnalysisResult {
+function parseAnalysisResponse(content: string, objectives?: AnalysisObjective[]): LLMAnalysisResult {
   // Extract JSON from the response (it might be wrapped in markdown code blocks or have headers)
   let jsonStr = content;
   
@@ -918,13 +1015,27 @@ function parseAnalysisResponse(content: string): LLMAnalysisResult {
     // Combine proper suggestedCards with any misplaced ones
     const allSuggestedCards = [...(parsed.suggestedCards ?? []), ...misplacedCards];
     
+    const objectiveList = objectives?.length ? objectives : DEFAULT_ANALYSIS_OBJECTIVES;
+    const objectiveKeyMap = getObjectiveKeyMap(objectiveList);
+    const objectiveMap: Record<string, boolean> = {};
+    const objectivePayload = (parsed.feedback?.objectives && typeof parsed.feedback.objectives === 'object')
+      ? parsed.feedback.objectives as Record<string, unknown>
+      : {};
+    for (const { key } of objectiveKeyMap) {
+      const rawValue = parsed.feedback?.[key] ?? objectivePayload[key];
+      if (typeof rawValue === 'boolean') {
+        objectiveMap[key] = rawValue;
+        continue;
+      }
+      // Backwards compatibility for legacy keys
+      const legacyValue = parsed.feedback?.[key as keyof typeof parsed.feedback];
+      objectiveMap[key] = typeof legacyValue === 'boolean' ? legacyValue : true;
+    }
+
     // Validate and provide defaults
     return {
       feedback: {
-        isUnambiguous: parsed.feedback?.isUnambiguous ?? true,
-        isAtomic: parsed.feedback?.isAtomic ?? true,
-        isRecognizable: parsed.feedback?.isRecognizable ?? true,
-        isActiveRecall: parsed.feedback?.isActiveRecall ?? true,
+        objectives: objectiveMap,
         overallScore: parsed.feedback?.overallScore ?? 5,
         issues: stringIssues,
         suggestions: stringSuggestions,
@@ -936,12 +1047,15 @@ function parseAnalysisResponse(content: string): LLMAnalysisResult {
     };
   } catch {
     // If parsing fails, create a minimal result with the raw text
+    const objectiveList = objectives?.length ? objectives : DEFAULT_ANALYSIS_OBJECTIVES;
+    const objectiveMap: Record<string, boolean> = {};
+    for (const { key } of getObjectiveKeyMap(objectiveList)) {
+      objectiveMap[key] = true;
+    }
+
     return {
       feedback: {
-        isUnambiguous: true,
-        isAtomic: true,
-        isRecognizable: true,
-        isActiveRecall: true,
+        objectives: objectiveMap,
         overallScore: 5,
         issues: [],
         suggestions: [],
@@ -1196,54 +1310,7 @@ async function generateDeckSummaryWithCoverage(
   const scores = results.map(r => r.result.feedback.overallScore);
   const avgScore = scores.length > 0 ? (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(1) : 'N/A';
   
-  const systemPrompt = `You are an expert curriculum designer and subject matter analyst. Your task is to analyze flashcard content to assess KNOWLEDGE COVERAGE of the subject matter.
-
-IMPORTANT: Focus on the SUBJECT MATTER being studied, NOT on Anki card quality. Analyze what topics/concepts the cards cover and what important topics are MISSING from the deck.
-
-You MUST respond with valid JSON only. No markdown, no code blocks, just raw JSON:
-
-{
-  "summary": "A 2-3 paragraph summary describing what subject/field this deck covers and how comprehensive it is.",
-  "knowledgeCoverage": {
-    "overallCoverage": "excellent|good|fair|poor",
-    "coverageScore": 7,
-    "summary": "A paragraph explaining how well this deck covers the subject matter. Focus on topic breadth and depth.",
-    "coveredTopics": ["Specific subject topic 1", "Specific subject topic 2", "Specific subject topic 3"],
-    "gaps": [
-      {
-        "topic": "Missing Subject Matter Topic",
-        "importance": "high|medium|low",
-        "description": "What specific knowledge in this field is not covered by the cards"
-      }
-    ],
-    "recommendations": [
-      "Add cards covering [specific subject matter topic]",
-      "Include more depth on [specific concept in the field]"
-    ]
-  },
-  "suggestedCards": [
-    {
-      "type": "basic",
-      "fields": [
-        {"name": "Front", "value": "Question about missing subject matter"},
-        {"name": "Back", "value": "Answer with the missing knowledge"}
-      ],
-      "explanation": "This card fills the gap in [subject topic] by covering [specific knowledge]"
-    }
-  ]
-}
-
-CRITICAL INSTRUCTIONS:
-1. Analyze the SUBJECT MATTER being studied, not card formatting or Anki best practices
-2. coveredTopics should list actual subject matter topics the cards teach (e.g., "Photosynthesis", "World War 2 causes", "Python list comprehensions")
-3. gaps should identify SUBJECT MATTER topics that are missing or under-covered in this field
-4. DO NOT mention card quality, formatting, or Anki-related issues in gaps - only missing subject knowledge
-5. Suggest 3-5 cards that teach MISSING SUBJECT MATTER content
-6. "type" must be exactly "basic" or "cloze"
-7. For basic cards: use field names "Front" and "Back"
-8. For cloze cards: use field names "Text" and optionally "Extra"
-9. Cloze syntax: {{c1::answer}} - do NOT include a trailing :: unless adding a hint
-10. coverageScore should be 1-10 (10 = excellent subject matter coverage)`;
+  const systemPrompt = DECK_COVERAGE_SYSTEM_PROMPT_RAW.trim();
 
   // Build card content list for the LLM
   let cardContentSection = '';
@@ -1280,28 +1347,58 @@ Remember: Focus on SUBJECT MATTER gaps, not card formatting or Anki techniques.`
     const apiKey = getApiKey(config);
     
     if (config.providerId === 'anthropic') {
-      response = await fetch(`${provider.baseUrl}/messages`, {
+      const endpoint = `${provider.baseUrl}/messages`;
+      const headers = {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      };
+      const body = {
+        model: config.model,
+        max_tokens: 4096,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userMessage }]
+      };
+      const startTime = Date.now();
+      logLLM({
+        direction: 'request',
+        providerId: config.providerId,
+        model: config.model,
+        endpoint,
+        payload: { headers: sanitizeHeaders(headers), body }
+      });
+
+      response = await fetch(endpoint, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': apiKey,
-          'anthropic-version': '2023-06-01',
-          'anthropic-dangerous-direct-browser-access': 'true'
-        },
-        body: JSON.stringify({
-          model: config.model,
-          max_tokens: 4096,
-          system: systemPrompt,
-          messages: [{ role: 'user', content: userMessage }]
-        })
+        headers,
+        body: JSON.stringify(body)
       });
       
       if (!response.ok) {
         const errText = await response.text().catch(() => 'Unknown error');
+        logLLM({
+          direction: 'error',
+          providerId: config.providerId,
+          model: config.model,
+          endpoint,
+          status: response.status,
+          durationMs: Date.now() - startTime,
+          payload: { error: errText }
+        });
         throw new Error(`API error (${response.status}): ${errText}`);
       }
       
       const data = await response.json();
+      logLLM({
+        direction: 'response',
+        providerId: config.providerId,
+        model: config.model,
+        endpoint,
+        status: response.status,
+        durationMs: Date.now() - startTime,
+        payload: data
+      });
       return parseDeckCoverageResponse(data.content[0].text);
     } else {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -1310,27 +1407,56 @@ Remember: Focus on SUBJECT MATTER gaps, not card formatting or Anki techniques.`
         headers['HTTP-Referer'] = window.location.origin;
         headers['X-Title'] = 'LLMAnki';
       }
-      
-      response = await fetch(`${provider.baseUrl}/chat/completions`, {
+
+      const endpoint = `${provider.baseUrl}/chat/completions`;
+      const body = {
+        model: config.model,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userMessage }
+        ],
+        temperature: 0.7,
+        max_tokens: 4096
+      };
+      const startTime = Date.now();
+      logLLM({
+        direction: 'request',
+        providerId: config.providerId,
+        model: config.model,
+        endpoint,
+        payload: { headers: sanitizeHeaders(headers), body }
+      });
+
+      response = await fetch(endpoint, {
         method: 'POST',
         headers,
-        body: JSON.stringify({
-          model: config.model,
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: userMessage }
-          ],
-          temperature: 0.7,
-          max_tokens: 4096
-        })
+        body: JSON.stringify(body)
       });
       
       if (!response.ok) {
         const errText = await response.text().catch(() => 'Unknown error');
+        logLLM({
+          direction: 'error',
+          providerId: config.providerId,
+          model: config.model,
+          endpoint,
+          status: response.status,
+          durationMs: Date.now() - startTime,
+          payload: { error: errText }
+        });
         throw new Error(`API error (${response.status}): ${errText}`);
       }
       
       const data = await response.json();
+      logLLM({
+        direction: 'response',
+        providerId: config.providerId,
+        model: config.model,
+        endpoint,
+        status: response.status,
+        durationMs: Date.now() - startTime,
+        payload: data
+      });
       return parseDeckCoverageResponse(data.choices[0].message.content);
     }
   } catch (e) {
@@ -1460,41 +1586,7 @@ export async function generateCardsFromPrompt(
   
   const apiKey = getApiKey(config);
   
-  const systemPrompt = `You are a flashcard creation expert. Your job is to create high-quality Anki flashcards based on the user's request.
-
-Follow these principles for creating effective flashcards:
-1. Each card should test ONE piece of information (atomic principle)
-2. Front side should be a clear question or prompt
-3. Back side should be a concise, complete answer
-4. Use cloze deletions for definitions or lists where appropriate
-5. Make cards specific and unambiguous
-6. Include context when needed to avoid confusion
-
-Respond ONLY with valid JSON in this format:
-{
-  "cards": [
-    {
-      "type": "basic" | "cloze",
-      "fields": [
-        { "name": "Front", "value": "question or prompt" },
-        { "name": "Back", "value": "answer or explanation" }
-      ],
-      "explanation": "brief reason why this card is useful"
-    }
-  ]
-}
-
-For cloze cards, use this format:
-{
-  "type": "cloze",
-  "fields": [
-    { "name": "Text", "value": "{{c1::cloze deletion}} in a sentence" },
-    { "name": "Extra", "value": "optional additional info" }
-  ],
-  "explanation": "reason for this card"
-}
-
-Create 3-10 cards depending on the topic complexity.`;
+  const systemPrompt = GENERATE_CARDS_SYSTEM_PROMPT_RAW.trim();
 
   const userMessage = `Create flashcards for the following request. The cards will be added to a deck called "${deckName}".
 
@@ -1505,38 +1597,85 @@ User request: ${prompt}`;
     
     if (config.providerId === 'ollama') {
       const ollama = new Ollama({ host: 'http://localhost:11434' });
-      const response = await ollama.chat({
+      const payload = {
         model: config.model,
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userMessage }
         ],
         options: { temperature: 0.7 }
+      };
+      const startTime = Date.now();
+      logLLM({
+        direction: 'request',
+        providerId: config.providerId,
+        model: config.model,
+        endpoint: 'ollama.chat',
+        payload
+      });
+      const response = await ollama.chat(payload);
+      logLLM({
+        direction: 'response',
+        providerId: config.providerId,
+        model: config.model,
+        endpoint: 'ollama.chat',
+        durationMs: Date.now() - startTime,
+        payload: response
       });
       content = response.message.content;
     } else if (config.providerId === 'anthropic') {
-      const response = await fetch(`${provider.baseUrl}/messages`, {
+      const endpoint = `${provider.baseUrl}/messages`;
+      const headers = {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      };
+      const body = {
+        model: config.model,
+        max_tokens: 4096,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userMessage }]
+      };
+      const startTime = Date.now();
+      logLLM({
+        direction: 'request',
+        providerId: config.providerId,
+        model: config.model,
+        endpoint,
+        payload: { headers: sanitizeHeaders(headers), body }
+      });
+
+      const response = await fetch(endpoint, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': apiKey,
-          'anthropic-version': '2023-06-01',
-          'anthropic-dangerous-direct-browser-access': 'true'
-        },
-        body: JSON.stringify({
-          model: config.model,
-          max_tokens: 4096,
-          system: systemPrompt,
-          messages: [{ role: 'user', content: userMessage }]
-        })
+        headers,
+        body: JSON.stringify(body)
       });
       
       if (!response.ok) {
         const errorText = await response.text();
+        logLLM({
+          direction: 'error',
+          providerId: config.providerId,
+          model: config.model,
+          endpoint,
+          status: response.status,
+          durationMs: Date.now() - startTime,
+          payload: { error: errorText }
+        });
         return { cards: [], error: `API error: ${errorText}` };
       }
       
       const data = await response.json();
+      logLLM({
+        direction: 'response',
+        providerId: config.providerId,
+        model: config.model,
+        endpoint,
+        status: response.status,
+        durationMs: Date.now() - startTime,
+        payload: data
+      });
       content = data.content[0].text;
     } else {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -1545,27 +1684,56 @@ User request: ${prompt}`;
         headers['HTTP-Referer'] = window.location.origin;
         headers['X-Title'] = 'LLMAnki';
       }
-      
-      const response = await fetch(`${provider.baseUrl}/chat/completions`, {
+
+      const endpoint = `${provider.baseUrl}/chat/completions`;
+      const body = {
+        model: config.model,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userMessage }
+        ],
+        temperature: 0.7,
+        max_tokens: 4096
+      };
+      const startTime = Date.now();
+      logLLM({
+        direction: 'request',
+        providerId: config.providerId,
+        model: config.model,
+        endpoint,
+        payload: { headers: sanitizeHeaders(headers), body }
+      });
+
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers,
-        body: JSON.stringify({
-          model: config.model,
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: userMessage }
-          ],
-          temperature: 0.7,
-          max_tokens: 4096
-        })
+        body: JSON.stringify(body)
       });
       
       if (!response.ok) {
         const errorText = await response.text();
+        logLLM({
+          direction: 'error',
+          providerId: config.providerId,
+          model: config.model,
+          endpoint,
+          status: response.status,
+          durationMs: Date.now() - startTime,
+          payload: { error: errorText }
+        });
         return { cards: [], error: `API error: ${errorText}` };
       }
       
       const data = await response.json();
+      logLLM({
+        direction: 'response',
+        providerId: config.providerId,
+        model: config.model,
+        endpoint,
+        status: response.status,
+        durationMs: Date.now() - startTime,
+        payload: data
+      });
       content = data.choices[0].message.content;
     }
     
@@ -1575,6 +1743,13 @@ User request: ${prompt}`;
     
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    logLLM({
+      direction: 'error',
+      providerId: config.providerId,
+      model: config.model,
+      endpoint: 'generateCardsFromPrompt',
+      payload: { error: errorMessage }
+    });
     return { cards: [], error: errorMessage };
   }
 }

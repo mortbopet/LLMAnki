@@ -25,9 +25,10 @@ import { ToastContainer } from './components/ToastContainer';
 import { SystemPromptUpdateModal } from './components/SystemPromptUpdateModal';
 import { ErrorModal } from './components/ErrorModal';
 import { ExportDeletionFilterModal } from './components/ExportDeletionFilterModal';
+import { LLMConsole } from './components/LLMConsole';
 import { LandingPage } from './components/LandingPage';
 import { AddCardPanel } from './components/AddCardPanel';
-import { analyzeCard, analyzeCardsInDeck, generateDeckInsights, getApiKey, DEFAULT_SYSTEM_PROMPT, SYSTEM_PROMPT_VERSION } from './utils/llmService';
+import { analyzeCard, analyzeCardsInDeck, generateDeckInsights, getApiKey, DEFAULT_SYSTEM_PROMPT, SYSTEM_PROMPT_VERSION, getObjectiveKeyMap, setLLMLogger } from './utils/llmService';
 import { exportCollection, getCardsInDeck } from './utils/ankiParser';
 
 import type { DeckAnalysisResult, RenderedCard, LLMAnalysisResult } from './types';
@@ -43,6 +44,7 @@ function App() {
     const isAnalyzing = useAppStore(state => state.isAnalyzing);
     const analysisError = useAppStore(state => state.analysisError);
     const llmConfig = useAppStore(state => state.llmConfig);
+    const displaySettings = useAppStore(state => state.displaySettings);
     const ankiSettings = useAppStore(state => state.ankiSettings);
     const setLLMConfig = useAppStore(state => state.setLLMConfig);
     const setShowSettings = useAppStore(state => state.setShowSettings);
@@ -66,14 +68,19 @@ function App() {
     const exportProgress = useAppStore(state => state.exportProgress);
     const setIsExporting = useAppStore(state => state.setIsExporting);
     const setExportProgress = useAppStore(state => state.setExportProgress);
+    const llmLogs = useAppStore(state => state.llmLogs);
+    const addLLMLog = useAppStore(state => state.addLLMLog);
+    const clearLLMLogs = useAppStore(state => state.clearLLMLogs);
 
     const [deckWidth, setDeckWidth] = useState(256);
     const [listWidth, setListWidth] = useState(288);
-    const dragRef = useRef<{ type: 'deck' | 'list' | null; startX: number; startDeck: number; startList: number }>({
+    const [consoleWidth, setConsoleWidth] = useState(360);
+    const dragRef = useRef<{ type: 'deck' | 'list' | 'console' | null; startX: number; startDeck: number; startList: number; startConsole: number }>({
         type: null,
         startX: 0,
         startDeck: 256,
         startList: 288,
+        startConsole: 360,
     });
 
     useEffect(() => {
@@ -95,9 +102,17 @@ function App() {
                 }
             } else if (dragRef.current.type === 'list') {
                 const next = Math.min(maxList, Math.max(minList, dragRef.current.startList + delta));
-                const remaining = totalWidth - deckWidth - next;
+                const remaining = totalWidth - deckWidth - next - (displaySettings.developerMode ? consoleWidth : 0);
                 if (remaining >= minMain) {
                     setListWidth(next);
+                }
+            } else if (dragRef.current.type === 'console') {
+                const minConsole = 280;
+                const maxConsole = 640;
+                const next = Math.min(maxConsole, Math.max(minConsole, dragRef.current.startConsole - delta));
+                const remaining = totalWidth - deckWidth - listWidth - next;
+                if (remaining >= minMain) {
+                    setConsoleWidth(next);
                 }
             }
         };
@@ -113,7 +128,7 @@ function App() {
             window.removeEventListener('mousemove', handleMouseMove);
             window.removeEventListener('mouseup', handleMouseUp);
         };
-    }, [deckWidth, listWidth]);
+    }, [deckWidth, listWidth, consoleWidth, displaySettings.developerMode]);
 
     const handleDeckResizeStart = useCallback((e: React.MouseEvent) => {
         dragRef.current = {
@@ -130,8 +145,19 @@ function App() {
             startX: e.clientX,
             startDeck: deckWidth,
             startList: listWidth,
+            startConsole: consoleWidth,
         };
-    }, [deckWidth, listWidth]);
+    }, [deckWidth, listWidth, consoleWidth]);
+
+    const handleConsoleResizeStart = useCallback((e: React.MouseEvent) => {
+        dragRef.current = {
+            type: 'console',
+            startX: e.clientX,
+            startDeck: deckWidth,
+            startList: listWidth,
+            startConsole: consoleWidth,
+        };
+    }, [deckWidth, listWidth, consoleWidth]);
 
     // Card editing
     const updateCardFields = useAppStore(state => state.updateCardFields);
@@ -240,6 +266,15 @@ function App() {
         }
     }, []); // Only run on mount
 
+    useEffect(() => {
+        if (displaySettings.developerMode) {
+            setLLMLogger(addLLMLog);
+            return () => setLLMLogger(null);
+        }
+        setLLMLogger(null);
+        return undefined;
+    }, [displaySettings.developerMode, addLLMLog]);
+
     // Note: Cache loading is now handled atomically in setCollection()
     // No separate useEffect needed - this eliminates race conditions
 
@@ -337,12 +372,13 @@ function App() {
             const errorMessage = error instanceof Error ? error.message : 'Analysis failed';
             setAnalysisError(errorMessage);
             // Cache the error so it shows in the card list
+            const objectives: Record<string, boolean> = {};
+            for (const { key } of getObjectiveKeyMap(llmConfig.analysisObjectives)) {
+                objectives[key] = false;
+            }
             setCardAnalysis(selectedCardId, {
                 feedback: {
-                    isUnambiguous: false,
-                    isAtomic: false,
-                    isRecognizable: false,
-                    isActiveRecall: false,
+                    objectives,
                     overallScore: 0,
                     issues: [],
                     suggestions: [],
@@ -798,6 +834,22 @@ function App() {
                                 </div>
                             )}
                         </div>
+
+                        {displaySettings.developerMode && (
+                            <>
+                                <div
+                                    onMouseDown={handleConsoleResizeStart}
+                                    className={`flex-shrink-0 w-1.5 cursor-col-resize ${isDarkMode ? 'bg-gray-800 hover:bg-gray-700' : 'bg-gray-100 hover:bg-gray-200'}`}
+                                />
+                                <div className="flex-shrink-0 h-full" style={{ width: consoleWidth }}>
+                                    <LLMConsole
+                                        logs={llmLogs}
+                                        isDarkMode={isDarkMode}
+                                        onClear={clearLLMLogs}
+                                    />
+                                </div>
+                            </>
+                        )}
                     </>
                 )}
             </main>

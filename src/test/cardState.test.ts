@@ -1651,10 +1651,12 @@ describe('Deck Persistence', () => {
     // Step 2: Set mock analysis result on the card
     const mockAnalysis: LLMAnalysisResult = {
       feedback: {
-        isUnambiguous: true,
-        isAtomic: true,
-        isRecognizable: true,
-        isActiveRecall: true,
+        objectives: {
+          isUnambiguous: true,
+          isAtomic: true,
+          isRecognizable: true,
+          isActiveRecall: true,
+        },
         overallScore: 85,
         issues: [],
         suggestions: ['Consider adding context'],
@@ -1706,10 +1708,12 @@ describe('Deck Persistence', () => {
     // Step 2: Set analysis with a suggested card
     const mockAnalysis: LLMAnalysisResult = {
       feedback: {
-        isUnambiguous: true,
-        isAtomic: true,
-        isRecognizable: true,
-        isActiveRecall: true,
+        objectives: {
+          isUnambiguous: true,
+          isAtomic: true,
+          isRecognizable: true,
+          isActiveRecall: true,
+        },
         overallScore: 80,
         issues: [],
         suggestions: ['Consider adding related cards'],

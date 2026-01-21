@@ -204,6 +204,27 @@ export interface DisplaySettings {
   darkMode: boolean;
   /** How to display suggested cards */
   suggestedCardsLayout: 'carousel' | 'list';
+  /** Show developer console panel */
+  developerMode: boolean;
+}
+
+export interface LLMLogEntry {
+  id: string;
+  timestamp: number;
+  direction: 'request' | 'response' | 'error';
+  providerId: string;
+  model: string;
+  endpoint?: string;
+  durationMs?: number;
+  status?: number;
+  payload?: unknown;
+}
+
+export interface AnalysisObjective {
+  /** Human-friendly label used in the UI */
+  label: string;
+  /** Description included in the system prompt */
+  description: string;
 }
 
 export interface LLMConfig {
@@ -212,6 +233,7 @@ export interface LLMConfig {
   apiKeys: Record<string, string>; // Per-provider API keys
   systemPrompt: string;
   systemPromptVersion?: number; // Track which version of the default prompt the user has
+  analysisObjectives: AnalysisObjective[];
   sendImages: boolean;
   maxDeckAnalysisCards: number;
   concurrentDeckAnalysis: boolean;
@@ -219,10 +241,7 @@ export interface LLMConfig {
 }
 
 export interface CardFeedback {
-  isUnambiguous: boolean;
-  isAtomic: boolean;
-  isRecognizable: boolean;
-  isActiveRecall: boolean;
+  objectives: Record<string, boolean>;
   overallScore: number;
   issues: string[];
   suggestions: string[];

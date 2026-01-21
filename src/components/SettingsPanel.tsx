@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Settings, X, RotateCcw, Key, Server, MessageSquare, Info, ExternalLink, Image, Layers, Zap, RefreshCw, Loader2, Clock, LayoutGrid, Cpu, SlidersHorizontal, Monitor, History, Sun, Moon, Database, Trash2, Download, FileArchive } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
-import { LLM_PROVIDERS, DEFAULT_SYSTEM_PROMPT, PROVIDER_INFO, SYSTEM_PROMPT_VERSION, fetchProviderModels, clearModelCache, type ModelInfo } from '../utils/llmService';
+import { LLM_PROVIDERS, DEFAULT_SYSTEM_PROMPT, PROVIDER_INFO, SYSTEM_PROMPT_VERSION, fetchProviderModels, clearModelCache, type ModelInfo, getObjectiveKeyMap, DEFAULT_ANALYSIS_OBJECTIVES } from '../utils/llmService';
 import { clearAllCaches, formatBytes, getGlobalCacheStats } from '../utils/analysisCache';
-import type { LLMConfig, AnkiSettings, DisplaySettings } from '../types';
+import type { LLMConfig, AnkiSettings, DisplaySettings, AnalysisObjective } from '../types';
 
 type SettingsTab = 'provider' | 'analysis' | 'display' | 'anki' | 'caching';
 
@@ -41,6 +41,8 @@ export const SettingsPanel: React.FC = () => {
 
     const selectedProvider = LLM_PROVIDERS.find(p => p.id === llmConfig.providerId);
     const providerInfo = PROVIDER_INFO[llmConfig.providerId];
+    const analysisObjectives = llmConfig.analysisObjectives;
+    const analysisObjectiveKeyMap = getObjectiveKeyMap(analysisObjectives);
 
     // Get current API key for the selected provider (with backwards compatibility)
     const currentApiKey = llmConfig.apiKeys?.[llmConfig.providerId] ?? '';
@@ -106,6 +108,30 @@ export const SettingsPanel: React.FC = () => {
         });
     };
 
+    const updateObjective = (index: number, updates: Partial<AnalysisObjective>) => {
+        const next = [...analysisObjectives];
+        next[index] = { ...next[index], ...updates };
+        updateConfig({ analysisObjectives: next });
+    };
+
+    const addObjective = () => {
+        const next = [
+            ...analysisObjectives,
+            { label: 'New Objective', description: '' }
+        ];
+        updateConfig({ analysisObjectives: next });
+    };
+
+    const resetObjectives = () => {
+        updateConfig({ analysisObjectives: DEFAULT_ANALYSIS_OBJECTIVES.map(obj => ({ ...obj })) });
+    };
+
+    const removeObjective = (index: number) => {
+        if (analysisObjectives.length <= 1) return;
+        const next = analysisObjectives.filter((_, i) => i !== index);
+        updateConfig({ analysisObjectives: next });
+    };
+
     const handleResetPrompt = () => {
         updateConfig({
             systemPrompt: DEFAULT_SYSTEM_PROMPT,
@@ -116,8 +142,15 @@ export const SettingsPanel: React.FC = () => {
     if (!showSettings) return null;
 
     return (
-        <div className="fixed inset-0 bg-black/50 flex items-start justify-center z-50 p-4 pt-16 overflow-y-auto">
-            <div className="bg-gray-800 rounded-xl w-full max-w-2xl overflow-hidden flex flex-col" style={{ minHeight: '500px' }}>
+        <div
+            className="fixed inset-0 bg-black/50 flex items-start justify-center z-50 p-4 pt-16 overflow-y-auto"
+            onClick={() => setShowSettings(false)}
+        >
+            <div
+                className="bg-gray-800 rounded-xl w-full max-w-2xl overflow-hidden flex flex-col"
+                style={{ minHeight: '500px' }}
+                onClick={(e) => e.stopPropagation()}
+            >
                 {/* Header */}
                 <div className="px-6 py-4 bg-gray-700 flex items-center justify-between">
                     <h2 className="text-lg font-semibold flex items-center gap-2">
@@ -342,8 +375,79 @@ export const SettingsPanel: React.FC = () => {
                                     className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
                                 />
                                 <p className="mt-1 text-xs text-gray-400">
-                                    This prompt is sent to the LLM before analyzing each card. Customize it to change the analysis criteria.
+                                    This base prompt is sent to the LLM before analyzing each card. Analysis objectives and the response schema are added automatically below.
                                 </p>
+                            </div>
+
+                            {/* Analysis Objectives */}
+                            <div>
+                                <div className="flex items-center justify-between mb-2">
+                                    <label className="flex items-center gap-2 text-sm font-medium text-gray-300">
+                                        <SlidersHorizontal className="w-4 h-4" />
+                                        Analysis Objectives
+                                    </label>
+                                    <button
+                                        onClick={resetObjectives}
+                                        className="flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300"
+                                    >
+                                        <RotateCcw className="w-3 h-3" />
+                                        Reset to Default
+                                    </button>
+                                </div>
+                                <p className="text-xs text-gray-400 mb-3">
+                                    Define the evaluation criteria used by the LLM. Keep labels short (e.g., "Atomic") and descriptions precise and testable.
+                                </p>
+                                <div className="space-y-3">
+                                    {analysisObjectives.map((objective, index) => (
+                                        <div key={index} className="bg-gray-700 rounded-lg p-3 border border-gray-600">
+                                            <div>
+                                                <label className="block text-xs text-gray-400 mb-1">Label</label>
+                                                <input
+                                                    type="text"
+                                                    value={objective.label}
+                                                    onChange={(e) => updateObjective(index, { label: e.target.value })}
+                                                    className="w-full px-2 py-1 bg-gray-800 border border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                                                    placeholder="Atomic"
+                                                />
+                                                <p className="mt-1 text-xs text-gray-400 font-mono">
+                                                    JSON key: {analysisObjectiveKeyMap[index]?.key}
+                                                </p>
+                                            </div>
+                                            <div className="mt-2">
+                                                <label className="block text-xs text-gray-400 mb-1">Description (sent to LLM)</label>
+                                                <textarea
+                                                    value={objective.description}
+                                                    onChange={(e) => updateObjective(index, { description: e.target.value })}
+                                                    className="w-full px-2 py-1 bg-gray-800 border border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                                                    rows={2}
+                                                    placeholder="Tests exactly one fact or concept."
+                                                />
+                                            </div>
+                                            <div className="mt-2">
+                                                <div className="flex justify-end">
+                                                    <button
+                                                        onClick={() => removeObjective(index)}
+                                                        disabled={analysisObjectives.length <= 1}
+                                                        className="text-xs text-red-400 hover:text-red-300 disabled:text-gray-500"
+                                                    >
+                                                        Remove
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                                <p className="mt-2 text-xs text-gray-400">
+                                    The JSON key is derived from the label (prefix "is" + label without spaces).
+                                </p>
+                                <div className="mt-3">
+                                    <button
+                                        onClick={addObjective}
+                                        className="px-2 py-1 text-xs rounded bg-blue-600 hover:bg-blue-700"
+                                    >
+                                        Add Objective
+                                    </button>
+                                </div>
                             </div>
 
                             {/* Send Images Toggle */}
@@ -470,6 +574,25 @@ export const SettingsPanel: React.FC = () => {
                                 </select>
                                 <p className="mt-1 text-xs text-gray-400">
                                     Choose how suggested replacement cards are displayed. Carousel shows one card at a time with navigation; List shows all cards stacked vertically.
+                                </p>
+                            </div>
+
+                            {/* Developer Mode */}
+                            <div>
+                                <label className="flex items-center gap-3 cursor-pointer">
+                                    <div className="flex items-center gap-2 text-sm font-medium text-gray-300">
+                                        <Cpu className="w-4 h-4" />
+                                        Developer Mode
+                                    </div>
+                                    <input
+                                        type="checkbox"
+                                        checked={displaySettings.developerMode || false}
+                                        onChange={(e) => updateDisplaySettings({ developerMode: e.target.checked })}
+                                        className="rounded border-gray-600 bg-gray-700 text-blue-500 focus:ring-blue-500"
+                                    />
+                                </label>
+                                <p className="mt-1 text-xs text-gray-400">
+                                    Show a console panel with LLM requests, responses, and timing information.
                                 </p>
                             </div>
                         </>
