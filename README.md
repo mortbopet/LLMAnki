@@ -7,11 +7,11 @@ LLMAnki is a web application that helps you improve your Anki flashcards using L
   <tr>
     <td align="center">
       <strong>Card Analysis</strong><br />
-      <video src="docs/media/card_analysis.mp4" width="420" controls muted loop autoplay></video>
+      <video src="https://github.com/user-attachments/assets/54b344dd-6573-4d37-959d-26558b29ca3b" width="420" controls muted loop autoplay></video>
     </td>
     <td align="center">
       <strong>Deck Analysis</strong><br />
-      <video src="docs/media/deck_analysis.mp4" width="420" controls muted loop></video>
+      <video src="https://github.com/user-attachments/assets/e3ca40ae-6f5d-4311-9460-095d6f6c2a2a" width="420" controls muted loop></video>
     </td>
   </tr>
 </table>
