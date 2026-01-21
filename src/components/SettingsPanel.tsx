@@ -47,11 +47,18 @@ export const SettingsPanel: React.FC = () => {
     // Get current API key for the selected provider (with backwards compatibility)
     const currentApiKey = llmConfig.apiKeys?.[llmConfig.providerId] ?? '';
 
-    // Load cache info when caching tab is active
+    // Load cache info when caching tab is active (poll while open to reflect new analyses)
     useEffect(() => {
-        if (activeTab === 'caching') {
+        if (activeTab !== 'caching') return;
+
+        setGlobalCacheStats(getGlobalCacheStats());
+        const intervalId = window.setInterval(() => {
             setGlobalCacheStats(getGlobalCacheStats());
-        }
+        }, 1000);
+
+        return () => {
+            window.clearInterval(intervalId);
+        };
     }, [activeTab, cacheRefreshKey]);
 
     // Fetch models when provider or API key changes

@@ -2,6 +2,10 @@
 
 LLMAnki is a web application that helps you improve your Anki flashcards using Large Language Models (LLMs). It analyzes your cards and decks against learning principles and suggests improvements.
 
+<p align="center">
+    <img src="https://github.com/mortbopet/LLMAnki/blob/master/docs/media/card_analysis.mp4?raw=true" />
+</p>
+
 ## Features
 
 - **📂 Load Anki Decks**: Import your exported `.apkg` files directly in the browser

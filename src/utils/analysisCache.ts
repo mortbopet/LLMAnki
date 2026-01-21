@@ -8,6 +8,12 @@
 
 // Cache storage key prefix
 const GLOBAL_CACHE_KEY = 'llmanki-global-analysis-cache';
+const DECK_STATE_PREFIX = 'llmanki-deck-state-';
+
+interface PersistedDeckStateSnapshot {
+  fileName?: string;
+  cards?: Array<{ analysis?: unknown | null }>;
+}
 
 // Interface for a cached card analysis (global cache entry)
 interface GlobalCachedAnalysis {
@@ -54,6 +60,9 @@ export function clearAllCaches(): void {
       if (key && key.startsWith('llmanki-analysis-cache-')) {
         keysToRemove.push(key);
       }
+      if (key && key.startsWith(DECK_STATE_PREFIX)) {
+        keysToRemove.push(key);
+      }
     }
     for (const key of keysToRemove) {
       localStorage.removeItem(key);
@@ -85,6 +94,7 @@ export function formatBytes(bytes: number): string {
 export function getGlobalCacheStats(): { entryCount: number; sizeBytes: number; deckNames: string[] } {
   const globalCache = getGlobalCache();
   const deckNames = new Set<string>();
+  let entryCount = globalCache.size;
   
   for (const entry of globalCache.values()) {
     if (entry.deckName) {
@@ -98,12 +108,35 @@ export function getGlobalCacheStats(): { entryCount: number; sizeBytes: number; 
     if (globalData) {
       sizeBytes = new Blob([globalData]).size;
     }
+    // Include per-deck persisted state (card-level analyses stored with deck state)
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key || !key.startsWith(DECK_STATE_PREFIX)) continue;
+      const json = localStorage.getItem(key);
+      if (!json) continue;
+      sizeBytes += new Blob([json]).size;
+      try {
+        const deckState = JSON.parse(json) as PersistedDeckStateSnapshot;
+        if (deckState.fileName) {
+          deckNames.add(deckState.fileName);
+        }
+        if (Array.isArray(deckState.cards)) {
+          for (const card of deckState.cards) {
+            if (card?.analysis) {
+              entryCount += 1;
+            }
+          }
+        }
+      } catch {
+        // Ignore parse errors for individual entries
+      }
+    }
   } catch (e) {
     // Ignore errors
   }
   
   return {
-    entryCount: globalCache.size,
+    entryCount,
     sizeBytes,
     deckNames: Array.from(deckNames).sort()
   };
