@@ -15,6 +15,8 @@ LLMAnki is a web application that helps you improve your Anki flashcards using L
 - **✏️ Card Editor**: Edit suggested cards before committing with rich text support
 - **🔄 Multiple LLM Providers**: Choose from OpenAI, Anthropic, Groq, Together AI, OpenRouter
 - **⚙️ Customizable Prompts**: Adjust the system prompt for different analysis criteria
+- **💾 Session caching**: Card (and deck) analyses are stored locally in your browser, such that you don't have to worry about losing the state of your deck while working in LLMAnki.
+
 
 ### Usage
 
@@ -105,6 +107,23 @@ npm run build
 - The app runs entirely in your browser - no backend required
 - Large decks may take a moment to load as SQLite parsing happens in-browser
 - This app has been entirely [vibe-coded](https://en.wikipedia.org/wiki/Vibe_coding) so expect rough edges!
+
+## App Settings
+
+The Settings panel contains various ways to tune analysis behavior or UI ergonomics. Highlights:
+
+- **LLM Provider**: Select provider, enter API key (if required), and choose the model. You can refresh the model list after updating the key.
+- **Analysis**:
+  - **System Prompt**: Base prompt used for card analysis. Keep the response schema intact when editing.
+  - **Analysis Objectives**: Custom scoring criteria that you want the LLM to evaluate your cards on.
+  - **Send Images**: Include card images in LLM requests for visual analysis (more tokens).
+  - **Concurrent Deck Analysis**: Analyze multiple cards at once (faster, higher rate-limit pressure). **Only** enable this if you have a paid subscription with the selected LLM provider, else you'll get rate limited very quickly.
+  - **Request Delay**: Throttle between API calls to avoid provider rate limits.
+- **Display**:
+  - **Developer Mode**: Shows a console containing LLM API requests/responses and timing.
+- **Anki**:
+  - **Inherit Scheduling Data**: Carry review history when replacing cards.
+- **Caching**: View and clear local analysis cache.
 
 ## License
 
