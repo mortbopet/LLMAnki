@@ -1,4 +1,5 @@
 import JSZip from 'jszip';
+import wasmUrl from 'sql.js/dist/sql-wasm.wasm?url';
 import { decompress } from 'fzstd';
 import { ZstdCodec } from 'zstd-codec';
 import { deserialize } from '@ygoe/msgpack';
@@ -289,12 +290,6 @@ function parseTextMediaManifest(text: string): Record<string, string> | null {
   return null;
 }
 
-// Declare global initSqlJs that will be loaded from CDN
-declare global {
-  interface Window {
-    initSqlJs: (config?: { locateFile?: (file: string) => string }) => Promise<SqlJsStatic>;
-  }
-}
 
 interface SqlJsStatic {
   Database: new (data?: ArrayLike<number>) => Database;
@@ -308,65 +303,19 @@ interface Database {
 }
 
 let SQL: SqlJsStatic | null = null;
-let sqlJsLoaded = false;
-
-/**
- * Check if we should use the npm sql.js package (Node.js/test environment) vs browser CDN
- * In jsdom test environment, window exists but we still need to use npm package
- */
-function shouldUseNpmSqlJs(): boolean {
-  // If no window, definitely use npm
-  if (typeof window === 'undefined') return true;
-  
-  // If no document, use npm
-  if (typeof document === 'undefined') return true;
-  
-  // If window.initSqlJs already exists (browser loaded script), use browser version
-  if (typeof window.initSqlJs === 'function') return false;
-  
-  // Check if we're in a test environment (vitest/jest with jsdom)
-  // In jsdom, scripts don't actually execute, so we need to use npm package
-  if (typeof process !== 'undefined' && process.env?.NODE_ENV === 'test') return true;
-  if (typeof process !== 'undefined' && process.env?.VITEST) return true;
-  
-  // Otherwise, try browser approach
-  return false;
-}
-
-async function loadSqlJs(): Promise<void> {
-  if (sqlJsLoaded) return;
-  
-  if (shouldUseNpmSqlJs()) {
-    // In Node.js/test environment, sql.js is loaded via import in getSql()
-    sqlJsLoaded = true;
-    return;
-  }
-  
-  return new Promise((resolve, reject) => {
-    const script = document.createElement('script');
-    script.src = 'https://sql.js.org/dist/sql-wasm.js';
-    script.onload = () => {
-      sqlJsLoaded = true;
-      resolve();
-    };
-    script.onerror = reject;
-    document.head.appendChild(script);
-  });
-}
 
 async function getSql(): Promise<SqlJsStatic> {
   if (!SQL) {
-    await loadSqlJs();
-    
-    if (shouldUseNpmSqlJs()) {
-      // In Node.js/test environment, use the npm package directly
-      const initSqlJs = (await import('sql.js')).default;
-      SQL = await initSqlJs();
-    } else {
-      SQL = await window.initSqlJs({
-        locateFile: (file: string) => `https://sql.js.org/dist/${file}`
-      });
+    const sqlModule = await import('sql.js/dist/sql-wasm.js');
+    const initSqlJs = (sqlModule.default ?? sqlModule) as
+      | ((config?: { locateFile?: (file: string) => string }) => Promise<SqlJsStatic>)
+      | undefined;
+    if (typeof initSqlJs !== 'function') {
+      throw new Error('sql.js initSqlJs export not found');
     }
+    SQL = await initSqlJs({
+      locateFile: (file: string) => (file.endsWith('.wasm') ? wasmUrl : file)
+    });
   }
   return SQL;
 }

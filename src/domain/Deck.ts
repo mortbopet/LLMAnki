@@ -23,6 +23,7 @@ import type {
 } from '../types';
 import type { CardStateData, ICard, CardSchedulingData, CardReviewData } from './types';
 import { createGeneratedCardData } from './Card';
+import wasmUrl from 'sql.js/dist/sql-wasm.wasm?url';
 
 // ============================================================================
 // Types
@@ -723,12 +724,21 @@ export class Deck {
    */
   async export(includeSubdecks: boolean = true): Promise<Blob> {
     // Dynamically import to avoid bundling these in the main app if not needed
-    const [{ default: initSqlJs }, JSZip] = await Promise.all([
-      import('sql.js'),
+    const [sqlModule, JSZip] = await Promise.all([
+      import('sql.js/dist/sql-wasm.js'),
       import('jszip').then(m => m.default),
     ]);
-    
-    const SQL = await initSqlJs();
+
+    const initSqlJs = (sqlModule.default ?? sqlModule) as
+      | ((config?: { locateFile?: (file: string) => string }) => Promise<{ Database: new () => { export: () => Uint8Array; close: () => void } }>)
+      | undefined;
+    if (typeof initSqlJs !== 'function') {
+      throw new Error('sql.js initSqlJs export not found');
+    }
+
+    const SQL = await initSqlJs({
+      locateFile: (file: string) => (file.endsWith('.wasm') ? wasmUrl : file)
+    });
     const db = new SQL.Database();
     
     // Collect all deck IDs to export

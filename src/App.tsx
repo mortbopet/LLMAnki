@@ -136,8 +136,9 @@ function App() {
             startX: e.clientX,
             startDeck: deckWidth,
             startList: listWidth,
+            startConsole: consoleWidth,
         };
-    }, [deckWidth, listWidth]);
+    }, [deckWidth, listWidth, consoleWidth]);
 
     const handleListResizeStart = useCallback((e: React.MouseEvent) => {
         dragRef.current = {

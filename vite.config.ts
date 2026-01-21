@@ -5,7 +5,7 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   optimizeDeps: {
-    exclude: ['sql.js']
+    include: ['sql.js/dist/sql-wasm.js']
   },
   build: {
     target: 'esnext'
