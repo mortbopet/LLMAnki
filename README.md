@@ -2,9 +2,19 @@
 
 LLMAnki is a web application that helps you improve your Anki flashcards using Large Language Models (LLMs). It analyzes your cards and decks against learning principles and suggests improvements.
 
-<p align="center">
-    <img src="https://github.com/mortbopet/LLMAnki/blob/master/docs/media/card_analysis.mp4?raw=true" />
-</p>
+
+<table>
+  <tr>
+    <td align="center">
+      <strong>Card Analysis</strong><br />
+      <video src="docs/media/card_analysis.mp4" width="420" controls muted loop autoplay></video>
+    </td>
+    <td align="center">
+      <strong>Deck Analysis</strong><br />
+      <video src="docs/media/deck_analysis.mp4" width="420" controls muted loop></video>
+    </td>
+  </tr>
+</table>
 
 ## Features
 
@@ -34,7 +44,9 @@ The app has mainly been tested using Groq's free tier, so using other models may
     * Remember to select "Include scheduling information", "Include deck presets" and "Include media" for the best experience
 2. **Load a Deck**: Click "Load .apkg" to import your Anki deck into LLMAnki
 3. **Browse Cards**: Select a deck from the sidebar, then click on a card
-4. **Analyze**: Click "Analyze" to get feedback and suggested alternative cards
+4. **Analyze**:
+    - Click "Analyze" on a card to get feedback and suggested alternative cards
+    - Click "Generate Insights" for a deck to get a deck-wide analysis
 5. **Review & Edit**: Review suggestions, edit if needed, and add new suggested cards
 6. **Export**: Download your modified deck
 7. **Re-import to Anki**: Start the Anki app on your computer, press `File->Import`, and select the exported `.apkg` file.
