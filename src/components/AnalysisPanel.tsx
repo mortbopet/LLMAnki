@@ -79,9 +79,11 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ result }) => {
     }, [updateSuggestedCard]);
 
     const handleAddCard = async (card: SuggestedCard, index: number) => {
-        if (selectedDeckId !== null) {
+        const sourceDeckId = selectedCardId ? cards.get(selectedCardId)?.deckId : null;
+        const targetDeckId = sourceDeckId ?? selectedDeckId;
+        if (targetDeckId !== null) {
             // Pass the selected card ID for potential metadata inheritance, and the suggested card index
-            await addCard(card, selectedDeckId, selectedCard?.id, index);
+            await addCard(card, targetDeckId, selectedCard?.id, index);
         }
     };
 
