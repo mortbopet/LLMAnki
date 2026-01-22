@@ -235,7 +235,6 @@ export interface LLMConfig {
   systemPromptVersion?: number; // Track which version of the default prompt the user has
   analysisObjectives: AnalysisObjective[];
   sendImages: boolean;
-  maxDeckAnalysisCards: number;
   concurrentDeckAnalysis: boolean;
   requestDelayMs: number; // Delay between requests during deck analysis (for rate limiting)
 }

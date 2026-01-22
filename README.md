@@ -63,13 +63,16 @@ This app is **highly experimental** and thus provides no guarantees of the integ
 
 ## Supported LLM Providers
 
+22/01/26: As of writing, the application has mostly been tested with OpenRouter and Groq models.  
+To get started, I suggest setting up an OpenRouter account, place your API key in LLMAnki, and select one of the popular [free models](https://openrouter.ai/models?order=most-popular&q=free) - OpenRouter don't seem to rate limit too heavily.
+
 | Provider | Free Tier | API Key Required |
 |----------|-----------|------------------|
+| OpenRouter | Yes (some models) | Yes |
 | Groq | Yes | Yes |
 | OpenAI | No | Yes |
-| Anthropic | No | Yes |
 | Together AI | Yes (limited) | Yes |
-| OpenRouter | Yes (some models) | Yes |
+| Anthropic | No | Yes |
 | Ollama | Yes (local) | No |
 
 ### Getting API Keys

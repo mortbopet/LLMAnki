@@ -300,7 +300,6 @@ export function getDefaultConfig(): LLMConfig {
     systemPromptVersion: SYSTEM_PROMPT_VERSION,
     analysisObjectives: DEFAULT_ANALYSIS_OBJECTIVES.map(obj => ({ ...obj })),
     sendImages: true,
-    maxDeckAnalysisCards: 100,
     concurrentDeckAnalysis: false,
     requestDelayMs: 2000, // 2 seconds default delay between requests
   };
@@ -350,13 +349,14 @@ function buildAnalysisSystemPrompt(config: LLMConfig): string {
     '    }',
     '  ],',
     '  "deleteOriginal": boolean,',
-    '  "deleteReason": "explanation if deletion is recommended"',
+    '  "deleteReason": "explanation if deletion is recommended (only include when deleteOriginal is true)"',
     '}',
     '',
     'CRITICAL:',
     '- "feedback.issues" and "feedback.suggestions" are arrays of PLAIN TEXT STRINGS, not card objects',
     '- Card objects with "type", "fields", "explanation" go ONLY in the top-level "suggestedCards" array',
     '- Do NOT put card objects inside feedback.suggestions - that causes parsing errors',
+    '- ALWAYS include reasoning/explanations in "feedback.reasoning".',
   ].filter(Boolean).join('\n');
 }
 
@@ -1033,6 +1033,7 @@ function parseAnalysisResponse(content: string, objectives?: AnalysisObjective[]
     }
 
     // Validate and provide defaults
+    const deleteOriginal = parsed.deleteOriginal ?? false;
     return {
       feedback: {
         objectives: objectiveMap,
@@ -1042,8 +1043,8 @@ function parseAnalysisResponse(content: string, objectives?: AnalysisObjective[]
         reasoning: parsed.feedback?.reasoning ?? ''
       },
       suggestedCards: allSuggestedCards,
-      deleteOriginal: parsed.deleteOriginal ?? false,
-      deleteReason: parsed.deleteReason
+      deleteOriginal,
+      deleteReason: deleteOriginal ? parsed.deleteReason : undefined
     };
   } catch {
     // If parsing fails, create a minimal result with the raw text
@@ -1082,9 +1083,8 @@ export async function analyzeCardsInDeck(
 ): Promise<{ results: { cardId: number; result: LLMAnalysisResult }[]; error?: string }> {
   const results: { cardId: number; result: LLMAnalysisResult }[] = [];
   
-  // Analyze cards (use configurable limit)
-  const maxCards = config.maxDeckAnalysisCards || 100;
-  const cardsToAnalyze = cards.slice(0, maxCards);
+  // Analyze all cards
+  const cardsToAnalyze = cards;
   
   // Separate cards into already-analyzed and new
   const cachedCards: { cardId: number; result: LLMAnalysisResult }[] = [];

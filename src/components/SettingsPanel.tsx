@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Settings, X, RotateCcw, Key, Server, MessageSquare, Info, ExternalLink, Image, Layers, Zap, RefreshCw, Loader2, Clock, LayoutGrid, Cpu, SlidersHorizontal, Monitor, History, Sun, Moon, Database, Trash2, Download, FileArchive } from 'lucide-react';
+import { Settings, X, RotateCcw, Key, Server, MessageSquare, Info, ExternalLink, Image, Zap, RefreshCw, Loader2, Clock, LayoutGrid, Cpu, SlidersHorizontal, Monitor, History, Sun, Moon, Database, Trash2, Download, FileArchive } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 import { LLM_PROVIDERS, DEFAULT_SYSTEM_PROMPT, PROVIDER_INFO, SYSTEM_PROMPT_VERSION, fetchProviderModels, clearModelCache, type ModelInfo, getObjectiveKeyMap, DEFAULT_ANALYSIS_OBJECTIVES } from '../utils/llmService';
 import { clearAllCaches, formatBytes, getGlobalCacheStats } from '../utils/analysisCache';
@@ -495,24 +495,6 @@ export const SettingsPanel: React.FC = () => {
                                 </p>
                             </div>
 
-                            {/* Max Cards for Deck Analysis */}
-                            <div>
-                                <label className="flex items-center gap-2 text-sm font-medium text-gray-300 mb-2">
-                                    <Layers className="w-4 h-4" />
-                                    Max Cards for Deck Analysis
-                                </label>
-                                <input
-                                    type="number"
-                                    min={1}
-                                    max={500}
-                                    value={llmConfig.maxDeckAnalysisCards}
-                                    onChange={(e) => updateConfig({ maxDeckAnalysisCards: Math.max(1, Math.min(500, parseInt(e.target.value) || 50)) })}
-                                    className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                />
-                                <p className="mt-1 text-xs text-gray-400">
-                                    Maximum number of cards to analyze when running deck-level analysis (1-500). Higher values provide more comprehensive analysis but cost more API calls.
-                                </p>
-                            </div>
 
                             {/* Request Delay (Rate Limiting) */}
                             <div>

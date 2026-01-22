@@ -420,7 +420,7 @@ function App() {
 
         resetDeckAnalysisCancelled();
         setAnalyzingDeckId(selectedDeckId);
-        setDeckAnalysisProgress({ current: 0, total: Math.min(deckCards.length, llmConfig.maxDeckAnalysisCards) });
+        setDeckAnalysisProgress({ current: 0, total: deckCards.length });
         setAnalysisError(null);
 
         try {
@@ -810,7 +810,7 @@ function App() {
                                                         </div>
                                                     </div>
                                                     <div className={`text-xs text-center space-y-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                                                        <p><strong>Analyze Cards:</strong> Runs LLM on up to {llmConfig.maxDeckAnalysisCards} cards (skips cached)</p>
+                                                        <p><strong>Analyze Cards:</strong> Runs LLM on all cards in this deck (including subdecks) and skips cached results</p>
                                                         <p><strong>Generate Insights:</strong> Creates deck summary &amp; suggestions from analyzed cards</p>
                                                     </div>
                                                 </div>

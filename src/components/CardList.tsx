@@ -232,8 +232,18 @@ export const CardList: React.FC = () => {
 
         return [...stateFilteredCards].sort((a, b) => {
             if (sortBy === 'score-asc' || sortBy === 'score-desc') {
-                const scoreA = analysisCache.get(a.id)?.feedback?.overallScore ?? -1;
-                const scoreB = analysisCache.get(b.id)?.feedback?.overallScore ?? -1;
+                const resultA = analysisCache.get(a.id);
+                const resultB = analysisCache.get(b.id);
+                const hasScoreA = typeof resultA?.feedback?.overallScore === 'number';
+                const hasScoreB = typeof resultB?.feedback?.overallScore === 'number';
+
+                // Always push unanalyzed cards to the end
+                if (!hasScoreA && !hasScoreB) return 0;
+                if (!hasScoreA) return 1;
+                if (!hasScoreB) return -1;
+
+                const scoreA = resultA!.feedback.overallScore;
+                const scoreB = resultB!.feedback.overallScore;
                 return sortBy === 'score-asc' ? scoreA - scoreB : scoreB - scoreA;
             }
 
