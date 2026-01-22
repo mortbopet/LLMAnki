@@ -34,7 +34,7 @@ LLMAnki is a web application that helps you improve your Anki flashcards using L
 
 ### Usage
 
-🚨 **Before doing anything, you need to configure an LLM provider**. To do so, click the Settings icon to configure your LLM provider, API key and model (see [section below for further details](##supported-llm-providers)).
+🚨 **Before doing anything, you need to configure an LLM provider**. To do so, click the Settings icon to configure your LLM provider, API key and model (see [section below for further details](#supported-llm-providers)).
 
 1. **Export from Anki**: In the Anki app, select a deck for export
     * Select format "Anki Deck Package (.apkg)
