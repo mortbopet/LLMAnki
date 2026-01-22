@@ -34,10 +34,7 @@ LLMAnki is a web application that helps you improve your Anki flashcards using L
 
 ### Usage
 
-Before doing anything, you need to configure an LLM provider. To do so, click the Settings icon to configure your LLM provider and API key (see section below for further details).
-
-The app has mainly been tested using Groq's free tier, so using other models may be flaky or non-functional.
-
+🚨 **Before doing anything, you need to configure an LLM provider**. To do so, click the Settings icon to configure your LLM provider, API key and model (see [section below for further details](#supported-llm-providers)).
 
 1. **Export from Anki**: In the Anki app, select a deck for export
     * Select format "Anki Deck Package (.apkg)
@@ -64,7 +61,7 @@ This app is **highly experimental** and thus provides no guarantees of the integ
 ## Supported LLM Providers
 
 22/01/26: As of writing, the application has mostly been tested with OpenRouter and Groq models.  
-To get started, I suggest setting up an OpenRouter account, place your API key in LLMAnki, and select one of the popular [free models](https://openrouter.ai/models?order=most-popular&q=free) - OpenRouter don't seem to rate limit too heavily.
+To get started, I suggest setting up an [OpenRouter account](https://openrouter.ai/keys), place your API key in LLMAnki, and select one of the popular [free models](https://openrouter.ai/models?order=most-popular&q=free) - OpenRouter doesn't seem to rate limit too heavily.
 
 | Provider | Free Tier | API Key Required |
 |----------|-----------|------------------|
@@ -81,7 +78,7 @@ To get started, I suggest setting up an OpenRouter account, place your API key i
 - **OpenAI**: [platform.openai.com](https://platform.openai.com)
 - **Anthropic**: [console.anthropic.com](https://console.anthropic.com)
 - **Together AI**: [api.together.xyz](https://api.together.xyz)
-- **OpenRouter**: [openrouter.ai](https://openrouter.ai) - Aggregates multiple providers
+- **OpenRouter**: [openrouter.ai](https://openrouter.ai/keys) - Aggregates multiple providers
 
 ## Card Analysis Criteria
 
