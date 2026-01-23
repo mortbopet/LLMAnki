@@ -270,8 +270,8 @@ export const CardViewer: React.FC<CardViewerProps> = ({
         setLocalFields(newFields);
 
         // Notify parent to persist the change
-        if (onUpdateFields && cardId !== null) {
-            onUpdateFields(cardId, newFields);
+        if (onUpdateFields) {
+            onUpdateFields(cardId ?? -1, newFields);
         }
     };
 

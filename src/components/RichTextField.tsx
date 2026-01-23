@@ -213,26 +213,47 @@ export const RichTextField: React.FC<RichTextFieldProps> = ({
         input.click();
     }, [editor]);
 
-    const handleInsertCloze = useCallback(() => {
+    const getMaxClozeNumber = useCallback(() => {
+        const clozeMatches = value.match(/\{\{c(\d+)::/g) || [];
+        return clozeMatches.reduce((max, match) => {
+            const num = parseInt(match.match(/\d+/)?.[0] || '0', 10);
+            return Math.max(max, num);
+        }, 0);
+    }, [value]);
+
+    const insertCloze = useCallback((clozeNum: number) => {
         if (!editor) return;
         hasUserEdited.current = true;
 
         const { from, to } = editor.state.selection;
-        if (from === to) return; // No selection
-
-        const selectedText = editor.state.doc.textBetween(from, to);
-
-        // Find the highest cloze number in the current value
-        const clozeMatches = value.match(/\{\{c(\d+)::/g) || [];
-        const maxClozeNum = clozeMatches.reduce((max, match) => {
-            const num = parseInt(match.match(/\d+/)?.[0] || '0', 10);
-            return Math.max(max, num);
-        }, 0);
-        const clozeNum = maxClozeNum + 1;
+        const hasSelection = from !== to;
+        const selectedText = hasSelection ? editor.state.doc.textBetween(from, to) : '';
         const clozeText = `{{c${clozeNum}::${selectedText}}}`;
+        const cursorOffset = `{{c${clozeNum}::`.length;
 
-        editor.chain().focus().deleteSelection().insertContent(clozeText).run();
-    }, [editor, value]);
+        if (hasSelection) {
+            editor.chain().focus().deleteSelection().insertContent(clozeText).run();
+        } else {
+            editor
+                .chain()
+                .focus()
+                .insertContent(clozeText)
+                .setTextSelection(from + cursorOffset)
+                .run();
+        }
+    }, [editor]);
+
+    const handleInsertNextCloze = useCallback(() => {
+        const maxClozeNum = getMaxClozeNumber();
+        const clozeNum = maxClozeNum + 1 || 1;
+        insertCloze(clozeNum);
+    }, [getMaxClozeNumber, insertCloze]);
+
+    const handleInsertSameCloze = useCallback(() => {
+        const maxClozeNum = getMaxClozeNumber();
+        const clozeNum = maxClozeNum > 0 ? maxClozeNum : 1;
+        insertCloze(clozeNum);
+    }, [getMaxClozeNumber, insertCloze]);
 
     const handleInsertLink = useCallback(() => {
         if (!editor) return;
@@ -448,23 +469,41 @@ export const RichTextField: React.FC<RichTextFieldProps> = ({
                 <div className="flex-1" />
 
                 {showClozeButton && (
-                    <button
-                        type="button"
-                        tabIndex={-1}
-                        onClick={handleInsertCloze}
-                        className="flex items-center gap-1 px-2 py-1 text-xs bg-blue-600 hover:bg-blue-700 rounded"
-                        title="Create Cloze (select text first)"
-                    >
-                        <Type className="w-3 h-3" />
-                        Cloze
-                    </button>
+                    <div className="flex items-center gap-2">
+                        <button
+                            type="button"
+                            tabIndex={-1}
+                            onClick={handleInsertNextCloze}
+                            className="flex items-center gap-1 px-2 py-1 text-xs bg-blue-600 hover:bg-blue-700 rounded"
+                            title="Insert cloze with next index (cN+1)"
+                        >
+                            <Type className="w-3 h-3" />
+                            Cloze +
+                        </button>
+                        <button
+                            type="button"
+                            tabIndex={-1}
+                            onClick={handleInsertSameCloze}
+                            className="flex items-center gap-1 px-2 py-1 text-xs bg-blue-600 hover:bg-blue-700 rounded"
+                            title="Insert cloze with current max index (cN)"
+                        >
+                            <Type className="w-3 h-3" />
+                            Cloze =
+                        </button>
+                    </div>
                 )}
             </div>
 
             {/* Editor */}
             <EditorContent
                 editor={editor}
-                className="p-3 bg-gray-800 border border-gray-600 rounded-lg focus-within:border-blue-500 transition-colors [&_.is-editor-empty:first-child::before]:content-[attr(data-placeholder)] [&_.is-editor-empty:first-child::before]:text-gray-500 [&_.is-editor-empty:first-child::before]:float-left [&_.is-editor-empty:first-child::before]:h-0 [&_.is-editor-empty:first-child::before]:pointer-events-none"
+                className="no-swiping p-3 bg-gray-800 border border-gray-600 rounded-lg focus-within:border-blue-500 transition-colors [&_.is-editor-empty:first-child::before]:content-[attr(data-placeholder)] [&_.is-editor-empty:first-child::before]:text-gray-500 [&_.is-editor-empty:first-child::before]:float-left [&_.is-editor-empty:first-child::before]:h-0 [&_.is-editor-empty:first-child::before]:pointer-events-none"
+                onPointerDownCapture={(event) => event.stopPropagation()}
+                onMouseDownCapture={(event) => event.stopPropagation()}
+                onTouchStartCapture={(event) => event.stopPropagation()}
+                onPointerMoveCapture={(event) => event.stopPropagation()}
+                onMouseMoveCapture={(event) => event.stopPropagation()}
+                onTouchMoveCapture={(event) => event.stopPropagation()}
             />
         </div>
     );

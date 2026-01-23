@@ -1201,14 +1201,40 @@ export const useAppStore = create<AppStore>()(
           set(state => {
             if (index >= 0 && index < state.suggestedCards.length) {
               state.suggestedCards[index] = card;
+
+              const selectedCardId = state.selectedCardId;
+              if (selectedCardId) {
+                const cardState = state.cards.get(selectedCardId);
+                if (cardState?.analysis) {
+                  cardState.analysis = {
+                    ...cardState.analysis,
+                    suggestedCards: [...state.suggestedCards]
+                  };
+                }
+              }
             }
           });
+
+          get().persistDeckState();
         },
 
         removeSuggestedCard: (index) => {
           set(state => {
             state.suggestedCards = state.suggestedCards.filter((_, i) => i !== index);
+
+            const selectedCardId = state.selectedCardId;
+            if (selectedCardId) {
+              const cardState = state.cards.get(selectedCardId);
+              if (cardState?.analysis) {
+                cardState.analysis = {
+                  ...cardState.analysis,
+                  suggestedCards: [...state.suggestedCards]
+                };
+              }
+            }
           });
+
+          get().persistDeckState();
         },
 
         setEditingSuggestionIndex: (index) => {

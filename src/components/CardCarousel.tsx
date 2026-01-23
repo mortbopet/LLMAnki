@@ -57,6 +57,9 @@ export const CardCarousel: React.FC<CardCarouselProps> = ({
                 navigation={true}
                 initialSlide={initialSlide}
                 onSlideChange={handleSlideChange}
+                noSwiping={true}
+                noSwipingClass="no-swiping"
+                simulateTouch={false}
                 pagination={{
                     clickable: true,
                     dynamicBullets: true
@@ -75,7 +78,12 @@ export const CardCarousel: React.FC<CardCarouselProps> = ({
                     const isAdded = addedIndices.includes(index);
                     return (
                         <SwiperSlide key={index}>
-                            <div className={`pb-4 ${isAdded ? 'opacity-50' : ''}`}>
+                            <div
+                                className={`no-swiping pb-4 ${isAdded ? 'opacity-50' : ''}`}
+                                onPointerDown={(event) => event.stopPropagation()}
+                                onMouseDown={(event) => event.stopPropagation()}
+                                onTouchStart={(event) => event.stopPropagation()}
+                            >
                                 <div className={`rounded-lg shadow-lg shadow-black/30 transition-shadow overflow-hidden ${isAdded
                                     ? 'ring-1 ring-gray-500/30'
                                     : 'ring-1 ring-green-500/30 hover:shadow-xl hover:shadow-black/40'
