@@ -1343,6 +1343,7 @@ export const useAppStore = create<AppStore>()(
           const persistedAnkiSettings = (persisted.ankiSettings || {}) as Partial<AnkiSettings>;
           const persistedDisplaySettings = (persisted.displaySettings || {}) as Partial<DisplaySettings>;
           const migratedApiKeys = { ...currentState.llmConfig.apiKeys, ...(persistedConfig.apiKeys || {}) };
+          const migratedModelFilters = { ...currentState.llmConfig.modelFilters, ...(persistedConfig.modelFilters || {}) };
           const legacyApiKey = (persistedConfig as { apiKey?: string }).apiKey;
           if (legacyApiKey && !migratedApiKeys[persistedConfig.providerId || '']) {
             const legacyProviderId = persistedConfig.providerId || currentState.llmConfig.providerId;
@@ -1355,6 +1356,7 @@ export const useAppStore = create<AppStore>()(
               ...currentState.llmConfig,
               ...persistedConfig,
               apiKeys: migratedApiKeys,
+              modelFilters: migratedModelFilters,
               analysisObjectives: persistedConfig.analysisObjectives || currentState.llmConfig.analysisObjectives,
             },
             ankiSettings: {

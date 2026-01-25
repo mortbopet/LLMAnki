@@ -40,6 +40,39 @@ export const SettingsPanel: React.FC = () => {
     const [cacheRefreshKey, setCacheRefreshKey] = useState(0);
 
     const selectedProvider = LLM_PROVIDERS.find(p => p.id === llmConfig.providerId);
+    const modelFilter = llmConfig.modelFilters?.[llmConfig.providerId] ?? '';
+    const trimmedModelFilter = modelFilter.trim();
+    const regexMatch = trimmedModelFilter.match(/^\/(.+)\/([gimsuy]*)$/);
+    const regexFlags = regexMatch?.[2]?.replace(/g/g, '');
+    let modelFilterRegex: RegExp | null = null;
+    let normalizedModelFilter = '';
+
+    if (trimmedModelFilter.length > 0) {
+        if (regexMatch) {
+            try {
+                modelFilterRegex = new RegExp(regexMatch[1], regexFlags);
+            } catch {
+                normalizedModelFilter = trimmedModelFilter.toLowerCase();
+            }
+        } else {
+            try {
+                modelFilterRegex = new RegExp(trimmedModelFilter, 'i');
+            } catch {
+                normalizedModelFilter = trimmedModelFilter.toLowerCase();
+            }
+        }
+    }
+
+    const filteredModels = trimmedModelFilter.length === 0
+        ? availableModels
+        : availableModels.filter(model => {
+            const id = model.id.toLowerCase();
+            const name = (model.name || '').toLowerCase();
+            if (modelFilterRegex) {
+                return modelFilterRegex.test(model.id) || modelFilterRegex.test(model.name || model.id);
+            }
+            return id.includes(normalizedModelFilter) || name.includes(normalizedModelFilter);
+        });
     const providerInfo = PROVIDER_INFO[llmConfig.providerId];
     const analysisObjectives = llmConfig.analysisObjectives;
     const analysisObjectiveKeyMap = getObjectiveKeyMap(analysisObjectives);
@@ -103,6 +136,16 @@ export const SettingsPanel: React.FC = () => {
         }
         fetchModels();
     }, [llmConfig.providerId, currentApiKey, fetchModels, selectedProvider]);
+
+    const updateModelFilter = useCallback((value: string) => {
+        const existingFilters = llmConfig.modelFilters || {};
+        updateConfig({
+            modelFilters: {
+                ...existingFilters,
+                [llmConfig.providerId]: value
+            }
+        });
+    }, [llmConfig.modelFilters, llmConfig.providerId, updateConfig]);
 
     const handleApiKeyChange = (value: string) => {
         // Ensure apiKeys object exists (backwards compatibility)
@@ -311,13 +354,21 @@ export const SettingsPanel: React.FC = () => {
                                         )}
                                     </button>
                                 </label>
+                                <input
+                                    type="text"
+                                    value={modelFilter}
+                                    onChange={(e) => updateModelFilter(e.target.value)}
+                                    placeholder="Search models (supports regex, e.g. /llama.*70b/i)"
+                                    className="w-full px-3 py-2 mb-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    disabled={isLoadingModels}
+                                />
                                 <select
                                     value={llmConfig.model}
                                     onChange={(e) => updateConfig({ model: e.target.value })}
                                     className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                                     disabled={isLoadingModels}
                                 >
-                                    {availableModels.map(model => (
+                                    {filteredModels.map(model => (
                                         <option key={model.id} value={model.id}>
                                             {model.name || model.id}
                                             {model.contextWindow ? ` (${Math.round(model.contextWindow / 1000)}k ctx)` : ''}
@@ -329,8 +380,14 @@ export const SettingsPanel: React.FC = () => {
                                 )}
                                 {availableModels.length > 0 && !modelsError && (
                                     <p className="mt-1 text-xs text-gray-400">
-                                        {availableModels.length} models available
+                                        {filteredModels.length} of {availableModels.length} models available
+                                        {normalizedModelFilter && ' (filtered)'}
                                         {selectedProvider?.requiresApiKey && !currentApiKey && ' (enter API key to see all)'}
+                                    </p>
+                                )}
+                                {filteredModels.length === 0 && availableModels.length > 0 && !modelsError && (
+                                    <p className="mt-1 text-xs text-gray-400">
+                                        No models match your search.
                                     </p>
                                 )}
                             </div>

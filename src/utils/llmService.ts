@@ -296,6 +296,7 @@ export function getDefaultConfig(): LLMConfig {
     providerId: 'groq',
     model: 'llama-3.3-70b-versatile',
     apiKeys: {},
+    modelFilters: {},
     systemPrompt: DEFAULT_SYSTEM_PROMPT,
     systemPromptVersion: SYSTEM_PROMPT_VERSION,
     analysisObjectives: DEFAULT_ANALYSIS_OBJECTIVES.map(obj => ({ ...obj })),

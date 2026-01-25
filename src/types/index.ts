@@ -231,6 +231,7 @@ export interface LLMConfig {
   providerId: string;
   model: string;
   apiKeys: Record<string, string>; // Per-provider API keys
+  modelFilters?: Record<string, string>; // Per-provider model filter (search/regex)
   systemPrompt: string;
   systemPromptVersion?: number; // Track which version of the default prompt the user has
   analysisObjectives: AnalysisObjective[];
