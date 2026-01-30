@@ -1,6 +1,7 @@
 import React, { useMemo, useCallback, useState, useRef } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { CreditCard, Tag, Layers, Search, X, CheckCircle, AlertCircle, Wand2, Trash2, Undo2, ArrowUpDown, ChevronDown, Pencil } from 'lucide-react';
+import Fuse from 'fuse.js';
 import { useAppStore } from '../store/useAppStore';
 import { renderCard, getCardTypeName } from '../utils/cardRenderer';
 import { getCardsInDeck } from '../utils/ankiParser';
@@ -21,6 +22,14 @@ interface CardListItemProps {
     onUnmarkForDeletion: (id: number) => void;
     onDeleteCard: (id: number) => void;
 }
+
+const stripHtml = (html: string): string => {
+    return html
+        .replace(/<[^>]*>/g, ' ')
+        .replace(/&nbsp;/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+};
 
 const CardListItem: React.FC<CardListItemProps> = ({
     card,
@@ -206,13 +215,32 @@ export const CardList: React.FC = () => {
     const filteredCards = useMemo(() => {
         if (!searchQuery.trim()) return allCards;
 
-        const query = searchQuery.toLowerCase();
+        const searchItems = allCards.map(card => {
+            const rendered = renderedCards.get(card.id);
+            const front = rendered ? stripHtml(rendered.front) : '';
+            const back = rendered ? stripHtml(rendered.back) : '';
+            const tags = rendered ? rendered.tags.join(' ') : '';
+            return {
+                id: card.id,
+                front,
+                back,
+                tags
+            };
+        });
+
+        const fuse = new Fuse(searchItems, {
+            keys: ['front', 'back', 'tags'],
+            threshold: 0.35,
+            ignoreLocation: true,
+            minMatchCharLength: 2
+        });
+
+        const matches = new Set(fuse.search(searchQuery).map(result => result.item.id));
+
         return allCards.filter(card => {
             const rendered = renderedCards.get(card.id);
             if (!rendered) return true; // Keep cards that haven't been rendered yet
-
-            const searchText = `${rendered.front} ${rendered.back} ${rendered.tags.join(' ')}`.toLowerCase();
-            return searchText.includes(query);
+            return matches.has(card.id);
         });
     }, [allCards, searchQuery, renderedCards]);
 
